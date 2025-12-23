@@ -44,7 +44,7 @@ extern "C" {
 /* USER CODE END EC */
 
 /* Private defines -----------------------------------------------------------*/
-#define TX_APP_STACK_SIZE                       1024
+#define TX_APP_STACK_SIZE                       4096 * 2
 #define TX_APP_THREAD_PRIO                      10
 /* USER CODE BEGIN PD */
 

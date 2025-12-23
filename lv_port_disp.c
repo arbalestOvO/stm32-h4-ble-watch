@@ -58,7 +58,6 @@ void my_disp_flush(lv_display_t *disp, const lv_area_t *area, uint8_t * px_map)
 
     /* 计算目标地址 (RGB565) */
     uint32_t dest_addr = LCD_FRAME_BUFFER + (area->y1 * LCD_WIDTH + area->x1) * 2;
-
     hdma2d.Init.Mode = DMA2D_M2M;
     hdma2d.Init.ColorMode = DMA2D_OUTPUT_RGB565;
     hdma2d.Init.OutputOffset = LCD_WIDTH - width;
@@ -152,46 +151,37 @@ void lv_port_disp_init(void)
     lv_display_set_buffers(disp, buf_1, buf_2, MY_DISP_HOR_RES * MY_DISP_VER_RES * 2 / 10, LV_DISPLAY_RENDER_MODE_PARTIAL);
 }
 
-#define TOUCH_LOST_WAIT_COUNT  3  // 建议 2~5 之间，太大会导致松手延迟
-
 void my_touchpad_read(lv_indev_t * indev, lv_indev_data_t * data)
 {
     static atk_rgblcd_touch_point_t tp_data;
     static int16_t last_x = 0;
     static int16_t last_y = 0;
 
-    // 计数器：记录连续多少次没读到数据
-    static uint8_t lost_count = 0;
-
-    // 1. 读取硬件
     uint8_t hardware_detected = atk_rgblcd_touch_scan(&tp_data, 1);
+    if (hardware_detected) {
+        printf("x: %d, y: %d\n", tp_data.x, tp_data.y);
+    }
+    if(hardware_detected) {
+        bool is_valid = true;
 
-    if(hardware_detected > 0) {
-        lost_count = 0;
+        if(tp_data.x == 0 && tp_data.y == 0) is_valid = false;
 
-        if(tp_data.x == 0 && tp_data.y == 0) return;
+        if(tp_data.x >= LCD_WIDTH || tp_data.y >= MY_DISP_VER_RES) is_valid = false;
+
+        if(is_valid) {
+            last_x = tp_data.x;
+            last_y = tp_data.y;
+        }
 
         data->state = LV_INDEV_STATE_PRESSED;
-        data->point.x = tp_data.x;
-        data->point.y = tp_data.y;
+        data->point.x = last_x;
+        data->point.y = last_y;
 
-        last_x = tp_data.x;
-        last_y = tp_data.y;
-    }
-    else {
+    } else {
+        data->state = LV_INDEV_STATE_RELEASED;
 
-        if(lost_count < TOUCH_LOST_WAIT_COUNT) {
-            data->state = LV_INDEV_STATE_PRESSED;
-            data->point.x = last_x;
-            data->point.y = last_y;
-
-            lost_count++; // 记一次账
-        }
-        else {
-            // 真的连续好几次没读到了，这才告诉 LVGL 真的松开了
-            data->state = LV_INDEV_STATE_RELEASED;
-            // 坐标保持不变即可
-        }
+        data->point.x = last_x;
+        data->point.y = last_y;
     }
 }
 
@@ -200,7 +190,6 @@ void lv_port_touch_init(void)
     atk_rgblcd_touch_init(ATK_RGBLCD_TOUCH_TYPE_GTXX);
     lv_indev_t *lv_indev = lv_indev_create();
     lv_indev_set_type(lv_indev, LV_INDEV_TYPE_POINTER);
-
     // 3. 绑定刚才写的回调函数
     lv_indev_set_read_cb(lv_indev, my_touchpad_read);
 }

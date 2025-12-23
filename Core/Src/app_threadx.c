@@ -21,6 +21,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "app_threadx.h"
 
+#include <stdio.h>
 #include "stm32h7xx_hal.h"
 #include "build/Release/_deps/lvgl-src/src/misc/lv_timer.h"
 
@@ -99,7 +100,7 @@ void tx_app_thread_entry(ULONG thread_input)
   /* USER CODE BEGIN tx_app_thread_entry */
   while (1) {
     lv_timer_handler(); // 处理UI绘制任务
-    tx_thread_sleep(5);       // 必须有短暂延时，给系统喘息
+    tx_thread_sleep(3);       // 必须有短暂延时，给系统喘息
   }
   /* USER CODE END tx_app_thread_entry */
 }

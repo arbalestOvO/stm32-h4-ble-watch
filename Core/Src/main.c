@@ -51,6 +51,12 @@ static void MPU_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+void my_stack_error_handler(TX_THREAD *thread_ptr)
+{
+  // 如果跑到这里，说明真的栈溢出了！
+  printf("ERROR: Stack Overflow detected in thread: %s\n", thread_ptr->tx_thread_name);
+  while(1); // 卡在这里方便调试
+}
 /* USER CODE END 0 */
 
 /**
@@ -110,7 +116,9 @@ int main(void)
   // create_touch_test_ui();
   // lv_example_test();
   ui_init();
+  tx_thread_stack_error_notify(my_stack_error_handler);
   /* USER CODE END 2 */
+
   MX_ThreadX_Init();
 
   /* We should never get here as control is now taken by the scheduler */
