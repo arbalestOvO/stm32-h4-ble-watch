@@ -19,28 +19,8 @@
  */
 
 #include "atk_rgblcd_touch_iic.h"
-static void delay_us(uint32_t us) {
-    uint32_t ticks;
-    uint32_t told, tnow, tcnt = 0;
-    uint32_t reload = SysTick->LOAD; // 获取重装载值
+#include "dwt_clk.h"
 
-    ticks = us * (SystemCoreClock / 1000000); // 需要计数的 Tick 数
-    told = SysTick->VAL;             // 获取当前数值
-
-    while (1) {
-        tnow = SysTick->VAL;
-        if (tnow != told) {
-            if (tnow < told)
-                tcnt += told - tnow; // 这里是倒计数
-            else
-                tcnt += reload - tnow + told;
-
-            told = tnow;
-            if (tcnt >= ticks)
-                break;
-        }
-    }
-}
 #if (ATK_RGBLCD_USING_TOUCH != 0)
 
 /**

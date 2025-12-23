@@ -59,6 +59,13 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     ${UI_SOURCES}
+    ${CMAKE_SOURCE_DIR}/Core/Src/atk_rgblcd.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/atk_rgblcd_ltdc.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/atk_rgblcd_touch_gtxx.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/atk_rgblcd_touch_iic.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/sdram.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/dwt_clk.c
+    ${CMAKE_SOURCE_DIR}/lv_port_disp.c
 )
 
 # Add include paths
