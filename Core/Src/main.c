@@ -4,10 +4,8 @@
 #include "app_threadx.h"
 #include "main.h"
 #include "adc.h"
-#include "atk_rgblcd.h"
 #include "crc.h"
 #include "dma2d.h"
-#include "dwt_clk.h"
 #include "ltdc.h"
 #include "memorymap.h"
 #include "quadspi.h"
@@ -18,6 +16,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "atk_rgblcd.h"
+#include "dwt_clk.h"
 #include "printf_impl.h"
 #include "sdram.h"
 #include "lv_port_disp.h"
@@ -119,8 +119,8 @@ int main(void)
   // lv_example_test();
   ui_init();
   tx_thread_stack_error_notify(my_stack_error_handler);
+  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
   /* USER CODE END 2 */
-
   MX_ThreadX_Init();
 
   /* We should never get here as control is now taken by the scheduler */
@@ -312,10 +312,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   if (htim->Instance == TIM6)
   {
     HAL_IncTick();
-    lv_tick_inc(1);
   }
   /* USER CODE BEGIN Callback 1 */
-
+  if (htim->Instance == TIM6)
+  {
+    lv_tick_inc(1);
+  }
   /* USER CODE END Callback 1 */
 }
 

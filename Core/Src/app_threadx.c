@@ -21,13 +21,11 @@
 /* Includes ------------------------------------------------------------------*/
 #include "app_threadx.h"
 
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "stm32h7xx_hal.h"
 #include "build/Release/_deps/lvgl-src/src/misc/lv_timer.h"
-
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/

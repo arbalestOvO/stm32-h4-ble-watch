@@ -162,9 +162,6 @@ void my_touchpad_read(lv_indev_t * indev, lv_indev_data_t * data)
     old_interrupt_posture = tx_interrupt_control(TX_INT_DISABLE);
     uint8_t hardware_detected = atk_rgblcd_touch_scan(&tp_data, 1);
     tx_interrupt_control(old_interrupt_posture);
-    if (hardware_detected) {
-        printf("x: %d, y: %d\n", tp_data.x, tp_data.y);
-    }
     if(hardware_detected) {
         bool is_valid = true;
 
