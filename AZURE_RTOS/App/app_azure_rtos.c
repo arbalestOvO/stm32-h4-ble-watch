@@ -25,7 +25,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "U3_ASS_U1.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -102,7 +102,7 @@ VOID tx_application_define(VOID *first_unused_memory)
     }
 
     /* USER CODE BEGIN  App_ThreadX_Init_Success */
-
+    App_UART_Bridge_Init();
     /* USER CODE END  App_ThreadX_Init_Success */
 
   }

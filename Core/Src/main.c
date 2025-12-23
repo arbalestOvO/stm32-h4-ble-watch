@@ -7,6 +7,7 @@
 #include "atk_rgblcd.h"
 #include "crc.h"
 #include "dma2d.h"
+#include "dwt_clk.h"
 #include "ltdc.h"
 #include "memorymap.h"
 #include "quadspi.h"
@@ -14,6 +15,9 @@
 #include "usart.h"
 #include "gpio.h"
 #include "fmc.h"
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
 #include "printf_impl.h"
 #include "sdram.h"
 #include "lv_port_disp.h"
@@ -21,9 +25,6 @@
 #include "lvgl.h"
 #include "stm32h7xx_hal_dma2d.h"
 #include "ui.h"
-
-/* Private includes ----------------------------------------------------------*/
-/* USER CODE BEGIN Includes */
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -106,6 +107,7 @@ int main(void)
   MX_CRC_Init();
   MX_DMA2D_Init();
   /* USER CODE BEGIN 2 */
+  DWT_Delay_Init();
   sdram_init();
   atk_rgblcd_init();
   atk_rgblcd_display_on();

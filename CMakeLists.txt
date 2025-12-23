@@ -66,6 +66,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/Core/Src/sdram.c
     ${CMAKE_SOURCE_DIR}/Core/Src/dwt_clk.c
     ${CMAKE_SOURCE_DIR}/lv_port_disp.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/U3_ASS_U1.c
 )
 
 # Add include paths

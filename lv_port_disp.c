@@ -7,6 +7,7 @@
 #include "atk_rgblcd_ltdc.h"
 #include "stm32h7xx_hal_dma2d.h"
 #include "atk_rgblcd_touch.h"
+#include "tx_api.h"
 
 #define LCD_FRAMEBUFFER_START_ADDR  0xC0000000
 #define LCD_WIDTH_PHY               1024
@@ -156,8 +157,11 @@ void my_touchpad_read(lv_indev_t * indev, lv_indev_data_t * data)
     static atk_rgblcd_touch_point_t tp_data;
     static int16_t last_x = 0;
     static int16_t last_y = 0;
+    UINT old_interrupt_posture;
 
+    old_interrupt_posture = tx_interrupt_control(TX_INT_DISABLE);
     uint8_t hardware_detected = atk_rgblcd_touch_scan(&tp_data, 1);
+    tx_interrupt_control(old_interrupt_posture);
     if (hardware_detected) {
         printf("x: %d, y: %d\n", tp_data.x, tp_data.y);
     }
