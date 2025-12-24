@@ -9,6 +9,7 @@
 #include "ltdc.h"
 #include "memorymap.h"
 #include "quadspi.h"
+#include "rng.h"
 #include "sdmmc.h"
 #include "usart.h"
 #include "gpio.h"
@@ -17,6 +18,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "atk_rgblcd.h"
+#include "crypto_utils.h"
 #include "dwt_clk.h"
 #include "printf_impl.h"
 #include "sdram.h"
@@ -106,6 +108,7 @@ int main(void)
   MX_CRC_Init();
   MX_DMA2D_Init();
   MX_LTDC_Init();
+  MX_RNG_Init();
   /* USER CODE BEGIN 2 */
   DWT_Delay_Init();
   sdram_init();
@@ -120,6 +123,7 @@ int main(void)
   ui_init();
   tx_thread_stack_error_notify(my_stack_error_handler);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
+  crypto_init();
   /* USER CODE END 2 */
 
   MX_ThreadX_Init();
@@ -161,8 +165,9 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI48|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 5;

@@ -22,10 +22,12 @@ uint8_t u3_to_u1_stack[BRIDGE_STACK_SIZE];
 // 2. 定义消息队列控制块和缓冲区
 TX_QUEUE queue_u1_to_u3;
 TX_QUEUE queue_u3_to_u1;
+TX_QUEUE queue_u3_bt;
 // ThreadX 队列实际上是按“消息”计数的，这里我们将每个消息定义为 1 个 uint8_t
 // 注意：ThreadX 队列底层是 ULONG 对齐的，所以这里申请空间时需要注意计算
 uint8_t q_buffer_1_3[QUEUE_SIZE * sizeof(ULONG)];
 uint8_t q_buffer_3_1[QUEUE_SIZE * sizeof(ULONG)];
+uint8_t q_buffer_3_b[QUEUE_SIZE * sizeof(ULONG)];
 
 // 3. 接收暂存变量 (用于 HAL 库的中断接收)
 volatile uint8_t rx_byte_u1;
@@ -49,6 +51,9 @@ void App_UART_Bridge_Init(void)
     // 2. 创建从 UART3 到 UART1 的队列
     tx_queue_create(&queue_u3_to_u1, "Queue U3->U1", TX_1_ULONG,
                     q_buffer_3_1, sizeof(q_buffer_3_1));
+
+    tx_queue_create(&queue_u3_bt, "Queue U3->APP", TX_1_ULONG,
+                q_buffer_3_b, sizeof(q_buffer_3_b));
 
     // 3. 创建处理线程 1 (优先级设为中等，例如 10)
     tx_thread_create(&u1_to_u3_thread, "Thread U1->U3",
@@ -140,6 +145,7 @@ void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
         msg_to_send = (ULONG)rx_byte_u3;
 
         tx_queue_send(&queue_u3_to_u1, &msg_to_send, TX_NO_WAIT);
+        tx_queue_send(&queue_u3_bt, &msg_to_send, TX_NO_WAIT);
 
         HAL_UART_Receive_IT(&huart3, (uint8_t *)&rx_byte_u3, 1);
     }

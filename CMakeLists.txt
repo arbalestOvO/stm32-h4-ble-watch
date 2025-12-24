@@ -28,6 +28,7 @@ include("cmake/gcc-arm-none-eabi.cmake")
 project(${CMAKE_PROJECT_NAME} C CXX)
 message("Build type: " ${CMAKE_BUILD_TYPE})
 file(GLOB_RECURSE UI_SOURCES "ui/*.c")
+file(GLOB_RECURSE LINK_SOURCES "LinkProtocol/src/*.c")
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -49,6 +50,7 @@ FetchContent_MakeAvailable(lvgl)
 # Enable compile command to ease indexing with e.g. clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
+add_subdirectory(TF-PSA-Crypto)
 
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
@@ -67,11 +69,14 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/Core/Src/dwt_clk.c
     ${CMAKE_SOURCE_DIR}/lv_port_disp.c
     ${CMAKE_SOURCE_DIR}/Core/Src/U3_ASS_U1.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/stm32_entropy_port.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/crypto_utils.c
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/LinkProtocol/include
     ${lvgl_SOURCE_DIR}
     ${lvgl_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/ui
@@ -88,6 +93,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE LV_CONF_INCLUDE_SIMPLE 
 
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
+    TF-PSA-Crypto::tfpsacrypto
     lvgl
     stm32cubemx
     # Add user defined libraries
