@@ -103,9 +103,9 @@ int main(void)
   MX_SDMMC1_SD_Init();
   MX_USART1_UART_Init();
   MX_USART3_UART_Init();
-  MX_LTDC_Init();
   MX_CRC_Init();
   MX_DMA2D_Init();
+  MX_LTDC_Init();
   /* USER CODE BEGIN 2 */
   DWT_Delay_Init();
   sdram_init();
@@ -121,6 +121,7 @@ int main(void)
   tx_thread_stack_error_notify(my_stack_error_handler);
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
   /* USER CODE END 2 */
+
   MX_ThreadX_Init();
 
   /* We should never get here as control is now taken by the scheduler */

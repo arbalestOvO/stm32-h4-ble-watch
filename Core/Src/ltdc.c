@@ -99,8 +99,7 @@ void MX_LTDC_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN LTDC_Init 2 */
-  HAL_NVIC_SetPriority(LTDC_IRQn, 0, 0); // 优先级根据实际情况设，不要太低
-  HAL_NVIC_EnableIRQ(LTDC_IRQn);         // 开启全局 LTDC 中断
+
   /* USER CODE END LTDC_Init 2 */
 
 }
