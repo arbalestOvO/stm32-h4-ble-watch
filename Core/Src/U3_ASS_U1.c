@@ -1,152 +1,242 @@
 //
 // Created by 19571 on 2025/12/23.
+// Modified for DMA Circular Mode + IDLE Detection
 //
 
 #include "U3_ASS_U1.h"
-
 #include <stdio.h>
-
+#include <string.h> // For memcpy
 #include "main.h"
 #include "tx_api.h"
 
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart3;
 
-/*Variables -----------------------------------------------------------------*/
-// 1. 定义线程控制块和栈
+/* Configuration ------------------------------------------------------------*/
+#define DMA_RX_BUF_SIZE     256  // 根据实际数据量调整，建议 256, 512, 1024
+#define UART_TX_TIMEOUT     100  // ms
+
+/* Variables ----------------------------------------------------------------*/
+// 1. 线程控制块
 TX_THREAD u1_to_u3_thread;
 TX_THREAD u3_to_u1_thread;
 uint8_t u1_to_u3_stack[BRIDGE_STACK_SIZE];
 uint8_t u3_to_u1_stack[BRIDGE_STACK_SIZE];
 
-// 2. 定义消息队列控制块和缓冲区
-TX_QUEUE queue_u1_to_u3;
-TX_QUEUE queue_u3_to_u1;
+// 2. 消息队列 (仅保留业务用的 U3->APP 队列)
 TX_QUEUE queue_u3_bt;
-// ThreadX 队列实际上是按“消息”计数的，这里我们将每个消息定义为 1 个 uint8_t
-// 注意：ThreadX 队列底层是 ULONG 对齐的，所以这里申请空间时需要注意计算
-uint8_t q_buffer_1_3[QUEUE_SIZE * sizeof(ULONG)];
-uint8_t q_buffer_3_1[QUEUE_SIZE * sizeof(ULONG)];
 uint8_t q_buffer_3_b[QUEUE_SIZE * sizeof(ULONG)];
 
-// 3. 接收暂存变量 (用于 HAL 库的中断接收)
-volatile uint8_t rx_byte_u1;
-volatile uint8_t rx_byte_u3;
+// 3. 事件标志组 (用于中断通知线程有数据到来)
+TX_EVENT_FLAGS_GROUP uart_event_flags;
+#define EVT_FLAG_U1_RX   (1 << 0)
+#define EVT_FLAG_U3_RX   (1 << 1)
 
-/*Function Prototypes -------------------------------------------------------*/
+// 4. DMA 接收相关变量
+// 接收缓冲区 (DMA 会循环写入这里)
+uint8_t rx_buf_u1[DMA_RX_BUF_SIZE] __attribute__((aligned(4)));
+uint8_t rx_buf_u3[DMA_RX_BUF_SIZE] __attribute__((aligned(4)));
+
+// 读取指针 (记录应用层读到了哪里的位置)
+volatile uint16_t u1_rx_read_pos = 0;
+volatile uint16_t u3_rx_read_pos = 0;
+
+/* Function Prototypes ------------------------------------------------------*/
 void Thread_U1_To_U3_Entry(ULONG thread_input);
 void Thread_U3_To_U1_Entry(ULONG thread_input);
+void Process_DMA_Buffer(UART_HandleTypeDef *huart, uint8_t *buffer, uint16_t buf_size, volatile uint16_t *read_pos, uint8_t is_u3);
 
 /**
-  * @brief  初始化串口透传的 RTOS 资源
-  * @note   请在 tx_application_define 中调用，或者在内核启动前调用
+  * @brief  初始化串口透传的 RTOS 资源及 DMA
   */
 void App_UART_Bridge_Init(void)
 {
-    // 1. 创建从 UART1 到 UART3 的队列
-    // TX_1_ULONG 表示每个消息的大小为 1 个 32位字 (虽然我们只传 uint8，但最小单位是 ULONG)
-    tx_queue_create(&queue_u1_to_u3, "Queue U1->U3", TX_1_ULONG,
-                    q_buffer_1_3, sizeof(q_buffer_1_3));
+    // 1. 创建事件标志组
+    tx_event_flags_create(&uart_event_flags, "UART RX Events");
 
-    // 2. 创建从 UART3 到 UART1 的队列
-    tx_queue_create(&queue_u3_to_u1, "Queue U3->U1", TX_1_ULONG,
-                    q_buffer_3_1, sizeof(q_buffer_3_1));
-
+    // 2. 创建 U3 -> APP 队列 (保持原有逻辑)
     tx_queue_create(&queue_u3_bt, "Queue U3->APP", TX_1_ULONG,
                 q_buffer_3_b, sizeof(q_buffer_3_b));
 
-    // 3. 创建处理线程 1 (优先级设为中等，例如 10)
+    // 3. 创建处理线程
     tx_thread_create(&u1_to_u3_thread, "Thread U1->U3",
                      Thread_U1_To_U3_Entry, 0,
                      u1_to_u3_stack, BRIDGE_STACK_SIZE,
                      10, 10, TX_NO_TIME_SLICE, TX_AUTO_START);
 
-    // 4. 创建处理线程 2
     tx_thread_create(&u3_to_u1_thread, "Thread U3->U1",
                      Thread_U3_To_U1_Entry, 0,
                      u3_to_u1_stack, BRIDGE_STACK_SIZE,
                      10, 10, TX_NO_TIME_SLICE, TX_AUTO_START);
+
+    // 4. 启动 DMA 接收 (Ex版本支持 ReceiveToIdle，如果不适用请换回标准 DMA Start)
+    // 即使没有数据，DMA 也会挂起等待
+    App_UART_Start_Receiving();
 }
 
 /**
-  * @brief  启动接收中断 (需要在主循环或线程启动初期调用一次)
+  * @brief  启动 DMA 接收 (Circular Mode)
+  * @note   需要在 CubeMX 中开启 UART1_RX 和 UART3_RX 的 DMA，并设为 Circular 模式
   */
 void App_UART_Start_Receiving(void)
 {
-    HAL_UART_Receive_IT(&huart1, (uint8_t *)&rx_byte_u1, 1);
-    HAL_UART_Receive_IT(&huart3, (uint8_t *)&rx_byte_u3, 1);
+    // 这里的接收是 Circular 模式，一旦启动，除非出错，否则不需要再次调用
+    // 使用 ReceiveToIdle_DMA 可以同时启用 IDLE 中断和 DMA
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buf_u1, DMA_RX_BUF_SIZE);
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart3, rx_buf_u3, DMA_RX_BUF_SIZE);
 }
 
 /**
-  * @brief  Thread: 读取队列并发送到 UART3
+  * @brief  Thread: 处理 U1 接收到的数据 -> 发送给 U3
   */
 void Thread_U1_To_U3_Entry(ULONG thread_input)
 {
-    ULONG received_msg;
-    uint8_t data_to_send;
-
-    // 确保第一次接收已启动
-    App_UART_Start_Receiving();
+    ULONG actual_flags;
 
     while(1)
     {
-        // 挂起等待队列中有数据 (TX_WAIT_FOREVER)
-        // 这一步是高效的关键：没有数据时，线程不占用任何 CPU
-        if (tx_queue_receive(&queue_u1_to_u3, &received_msg, TX_WAIT_FOREVER) == TX_SUCCESS)
+        // 等待 U1 接收事件 (由中断触发)
+        if (tx_event_flags_get(&uart_event_flags, EVT_FLAG_U1_RX, TX_OR_CLEAR, &actual_flags, TX_WAIT_FOREVER) == TX_SUCCESS)
         {
-            data_to_send = (uint8_t)(received_msg & 0xFF);
-
-            // 阻塞发送，超时设为 100ms
-            // 在 RTOS 线程中阻塞是可以的，它只会挂起当前线程，让出 CPU 给其他线程
-            HAL_UART_Transmit(&huart3, &data_to_send, 1, 100);
+            Process_DMA_Buffer(&huart1, rx_buf_u1, DMA_RX_BUF_SIZE, &u1_rx_read_pos, 0);
         }
     }
 }
 
 /**
-  * @brief  Thread: 读取队列并发送到 UART1
+  * @brief  Thread: 处理 U3 接收到的数据 -> 发送给 U1 & 推送 Queue
   */
 void Thread_U3_To_U1_Entry(ULONG thread_input)
 {
-    ULONG received_msg;
-    uint8_t data_to_send;
+    ULONG actual_flags;
 
     while(1)
     {
-        if (tx_queue_receive(&queue_u3_to_u1, &received_msg, TX_WAIT_FOREVER) == TX_SUCCESS)
+        // 等待 U3 接收事件
+        if (tx_event_flags_get(&uart_event_flags, EVT_FLAG_U3_RX, TX_OR_CLEAR, &actual_flags, TX_WAIT_FOREVER) == TX_SUCCESS)
         {
-            data_to_send = (uint8_t)(received_msg & 0xFF);
-            HAL_UART_Transmit(&huart1, &data_to_send, 1, 100);
+            Process_DMA_Buffer(&huart3, rx_buf_u3, DMA_RX_BUF_SIZE, &u3_rx_read_pos, 1);
         }
     }
 }
 
 /**
-  * @brief  HAL UART 接收完成回调
-  * @note   这是中断上下文，必须尽可能快地执行
+  * @brief  处理环形缓冲区的数据
+  * @param  huart: 串口句柄 (用于获取当前 DMA 写入位置)
+  * @param  buffer: 环形缓冲区指针
+  * @param  buf_size: 缓冲区总大小
+  * @param  read_pos: 上次处理到的位置指针
+  * @param  is_u3: 标记是否是 U3 (如果是 U3，需要额外发给 Queue)
   */
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+void Process_DMA_Buffer(UART_HandleTypeDef *huart, uint8_t *buffer, uint16_t buf_size, volatile uint16_t *read_pos, uint8_t is_u3)
 {
-    ULONG msg_to_send;
+    uint16_t write_pos;
+    uint16_t len;
+    uint16_t current_read = *read_pos;
+
+    // 计算当前 DMA 写到了哪里
+    // 方法：总大小 - DMA剩余数据量 (CNDTR)
+    write_pos = buf_size - __HAL_DMA_GET_COUNTER(huart->hdmarx);
+
+    if (current_read == write_pos)
+    {
+        return; // 没有新数据
+    }
+
+    // 此时有两种情况：
+    // 1. write > read: 数据连续 [read ... write]
+    // 2. write < read: 数据回绕 [read ... end] + [0 ... write]
+
+    if (write_pos > current_read)
+    {
+        len = write_pos - current_read;
+
+        // 1. 转发处理 (Bridge)
+        if (is_u3) {
+            HAL_UART_Transmit(&huart1, &buffer[current_read], len, UART_TX_TIMEOUT);
+
+            // 2. 只有 U3 需要发给 App Queue
+            for(int i=0; i<len; i++) {
+                ULONG msg = (ULONG)buffer[current_read + i];
+                tx_queue_send(&queue_u3_bt, &msg, TX_NO_WAIT);
+            }
+        } else {
+            // U1 -> U3
+            HAL_UART_Transmit(&huart3, &buffer[current_read], len, UART_TX_TIMEOUT);
+        }
+
+        current_read += len;
+    }
+    else // 回绕情况
+    {
+        // 第一段：Read -> End
+        uint16_t len1 = buf_size - current_read;
+        if (len1 > 0)
+        {
+            if (is_u3) {
+                HAL_UART_Transmit(&huart1, &buffer[current_read], len1, UART_TX_TIMEOUT);
+                for(int i=0; i<len1; i++) {
+                    ULONG msg = (ULONG)buffer[current_read + i];
+                    tx_queue_send(&queue_u3_bt, &msg, TX_NO_WAIT);
+                }
+            } else {
+                HAL_UART_Transmit(&huart3, &buffer[current_read], len1, UART_TX_TIMEOUT);
+            }
+        }
+
+        // 第二段：0 -> Write
+        uint16_t len2 = write_pos;
+        if (len2 > 0)
+        {
+            if (is_u3) {
+                HAL_UART_Transmit(&huart1, &buffer[0], len2, UART_TX_TIMEOUT);
+                for(int i=0; i<len2; i++) {
+                    ULONG msg = (ULONG)buffer[i];
+                    tx_queue_send(&queue_u3_bt, &msg, TX_NO_WAIT);
+                }
+            } else {
+                HAL_UART_Transmit(&huart3, &buffer[0], len2, UART_TX_TIMEOUT);
+            }
+        }
+
+        current_read = write_pos;
+    }
+
+    // 更新全局读指针
+    *read_pos = current_read;
+}
+
+/**
+  * @brief  HAL 扩展回调: 接收事件回调 (IDLE, Half Transfer, Full Transfer 都会触发)
+  * @note   这比 RxCpltCallback 更适合 DMA 变长数据接收
+  */
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+    // 注意：Size 参数在 Circular 模式下的含义可能因 HAL 版本而异
+    // 但我们主要利用这个中断来唤醒线程，具体的读写位置由 Process_DMA_Buffer 里的 CNDTR 计算
 
     if (huart->Instance == USART1)
     {
-        msg_to_send = (ULONG)rx_byte_u1;
-
-        // 将数据发送到队列，使用 TX_NO_WAIT 因为我们在中断里
-        // 如果队列满了，这里会丢弃数据（表明处理线程太慢或波特率不匹配）
-        tx_queue_send(&queue_u1_to_u3, &msg_to_send, TX_NO_WAIT);
-
-        // 重新开启中断接收
-        HAL_UART_Receive_IT(&huart1, (uint8_t *)&rx_byte_u1, 1);
+        tx_event_flags_set(&uart_event_flags, EVT_FLAG_U1_RX, TX_OR);
     }
     else if (huart->Instance == USART3)
     {
-        msg_to_send = (ULONG)rx_byte_u3;
+        tx_event_flags_set(&uart_event_flags, EVT_FLAG_U3_RX, TX_OR);
+    }
+}
 
-        tx_queue_send(&queue_u3_to_u1, &msg_to_send, TX_NO_WAIT);
-        tx_queue_send(&queue_u3_bt, &msg_to_send, TX_NO_WAIT);
-
-        HAL_UART_Receive_IT(&huart3, (uint8_t *)&rx_byte_u3, 1);
+/**
+  * @brief  错误回调 (可选，用于处理 Overrun 等)
+  */
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart->Instance == USART1)
+    {
+        // 可以在此添加错误恢复代码，例如重启 DMA
+         HAL_UARTEx_ReceiveToIdle_DMA(&huart1, rx_buf_u1, DMA_RX_BUF_SIZE);
+    }
+    else if (huart->Instance == USART3)
+    {
+         HAL_UARTEx_ReceiveToIdle_DMA(&huart3, rx_buf_u3, DMA_RX_BUF_SIZE);
     }
 }

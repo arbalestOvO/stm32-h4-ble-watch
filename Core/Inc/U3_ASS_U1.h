@@ -5,9 +5,12 @@
 #ifndef ABOLUO_EXIT_U3_ASS_U1_H
 #define ABOLUO_EXIT_U3_ASS_U1_H
 
+/* Defines ------------------------------------------------------------------*/
 #define BRIDGE_STACK_SIZE   1024
-#define QUEUE_SIZE          512  // 缓冲区深度，越大约不容易丢包，但耗费RAM
+#define QUEUE_SIZE          128  // 原有的队列大小定义
 
+/* Function Prototypes ------------------------------------------------------*/
 void App_UART_Bridge_Init(void);
+void App_UART_Start_Receiving(void);
 
 #endif //ABOLUO_EXIT_U3_ASS_U1_H

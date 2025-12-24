@@ -33,6 +33,7 @@ set(MX_Application_Src
     ${CMAKE_SOURCE_DIR}/Core/Src/app_threadx.c
     ${CMAKE_SOURCE_DIR}/Core/Src/adc.c
     ${CMAKE_SOURCE_DIR}/Core/Src/crc.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/dma.c
     ${CMAKE_SOURCE_DIR}/Core/Src/dma2d.c
     ${CMAKE_SOURCE_DIR}/Core/Src/fmc.c
     ${CMAKE_SOURCE_DIR}/Core/Src/ltdc.c

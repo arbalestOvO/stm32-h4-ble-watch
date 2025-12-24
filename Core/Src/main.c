@@ -5,6 +5,7 @@
 #include "main.h"
 #include "adc.h"
 #include "crc.h"
+#include "dma.h"
 #include "dma2d.h"
 #include "ltdc.h"
 #include "memorymap.h"
@@ -99,6 +100,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_FMC_Init();
   MX_QUADSPI_Init();
