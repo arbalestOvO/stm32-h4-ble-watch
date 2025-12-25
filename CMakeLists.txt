@@ -71,6 +71,9 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/Core/Src/U3_ASS_U1.c
     ${CMAKE_SOURCE_DIR}/Core/Src/stm32_entropy_port.c
     ${CMAKE_SOURCE_DIR}/Core/Src/crypto_utils.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/ble_client.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/app_ble.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/uint8_vector.c
 )
 
 # Add include paths

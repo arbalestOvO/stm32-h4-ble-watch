@@ -19,6 +19,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "atk_rgblcd.h"
+#include "ble_client.h"
 #include "crypto_utils.h"
 #include "dwt_clk.h"
 #include "printf_impl.h"
@@ -127,7 +128,6 @@ int main(void)
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
   crypto_init();
   /* USER CODE END 2 */
-
   MX_ThreadX_Init();
 
   /* We should never get here as control is now taken by the scheduler */
