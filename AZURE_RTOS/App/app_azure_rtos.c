@@ -26,6 +26,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app_ble.h"
+#include "app_log.h"
 #include "ble_client.h"
 #include "U3_ASS_U1.h"
 /* USER CODE END Includes */
@@ -107,6 +108,7 @@ VOID tx_application_define(VOID *first_unused_memory)
     App_UART_Bridge_Init();
     Ble_Client_Init();
     App_BLE_Init();
+    Printf_Init();
     /* USER CODE END  App_ThreadX_Init_Success */
 
   }

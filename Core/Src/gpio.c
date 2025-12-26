@@ -139,6 +139,12 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF9_FDCAN1;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : BLE_HS_Pin */
+  GPIO_InitStruct.Pin = BLE_HS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(BLE_HS_GPIO_Port, &GPIO_InitStruct);
+
   /*Configure GPIO pin : BLE_IRQ_Pin */
   GPIO_InitStruct.Pin = BLE_IRQ_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;

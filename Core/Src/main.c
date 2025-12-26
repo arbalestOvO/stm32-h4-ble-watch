@@ -23,7 +23,6 @@
 #include "ble_client.h"
 #include "crypto_utils.h"
 #include "dwt_clk.h"
-#include "printf_impl.h"
 #include "sdram.h"
 #include "lv_port_disp.h"
 #include "src/lv_init.h"
@@ -72,6 +71,7 @@ void my_stack_error_handler(TX_THREAD *thread_ptr)
   */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
   /* USER CODE END 1 */
 

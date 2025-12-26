@@ -8,9 +8,12 @@
 
 #include "app_threadx.h"
 #include "ble_client.h"
+#include "test_hci.h"
 #include "tx_api.h"
 
 void App_Ble_Client_Task_Entry(ULONG thread_input) {
+    bt_test_start();
+    return;
     if (Ble_Init_Role() != TX_SUCCESS) {
         printf("BLE Init Failed\n");
     }
