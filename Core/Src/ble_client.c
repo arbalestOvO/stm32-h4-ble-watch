@@ -122,41 +122,42 @@ void Ble_Client_Task_Entry(ULONG thread_input) {
     uint8_t rx_byte;
 
     while(1) {
-        if (tx_queue_receive(&queue_u3_bt, &rx_byte, TX_WAIT_FOREVER) == TX_SUCCESS) {
-
-            // --- SPP 模式处理 ---
-            if (ble_ctrl.is_spp_mode) {
-                // 在SPP模式下，直接透传给应用层
-                // 为提高效率，可以积攒几个字节再回调，或者每字节回调
-                if (ble_ctrl.rx_callback) {
-                    ble_ctrl.rx_callback(&rx_byte, 1);
-                }
-                // 注意：这里需要一种机制检测退出透传的标志（如"+++"回复等），
-                // 但通常退出由发送端控制，接收端只管收数据。
-                continue;
-            }
-
-            // --- AT 模式处理 (解析 '\r\n') ---
-            if (rx_byte == '>') {
-                // 特殊处理 '>' 提示符，它可能没有回车换行
-                ble_ctrl.line_buf[0] = '>';
-                ble_ctrl.line_buf[1] = '\0';
-                Ble_Parse_Line((char*)ble_ctrl.line_buf);
-                ble_ctrl.line_idx = 0;
-            }
-            else if (rx_byte == '\n' || rx_byte == '\r') {
-                if (ble_ctrl.line_idx > 0) {
-                    ble_ctrl.line_buf[ble_ctrl.line_idx] = '\0';
-                    Ble_Parse_Line((char*)ble_ctrl.line_buf);
-                    ble_ctrl.line_idx = 0;
-                }
-            }
-            else {
-                if (ble_ctrl.line_idx < BLE_RX_BUF_SIZE - 1) {
-                    ble_ctrl.line_buf[ble_ctrl.line_idx++] = rx_byte;
-                }
-            }
-        }
+        // 改成spi的队列
+        // if (tx_queue_receive(&queue_u3_bt, &rx_byte, TX_WAIT_FOREVER) == TX_SUCCESS) {
+        //
+        //     // --- SPP 模式处理 ---
+        //     if (ble_ctrl.is_spp_mode) {
+        //         // 在SPP模式下，直接透传给应用层
+        //         // 为提高效率，可以积攒几个字节再回调，或者每字节回调
+        //         if (ble_ctrl.rx_callback) {
+        //             ble_ctrl.rx_callback(&rx_byte, 1);
+        //         }
+        //         // 注意：这里需要一种机制检测退出透传的标志（如"+++"回复等），
+        //         // 但通常退出由发送端控制，接收端只管收数据。
+        //         continue;
+        //     }
+        //
+        //     // --- AT 模式处理 (解析 '\r\n') ---
+        //     if (rx_byte == '>') {
+        //         // 特殊处理 '>' 提示符，它可能没有回车换行
+        //         ble_ctrl.line_buf[0] = '>';
+        //         ble_ctrl.line_buf[1] = '\0';
+        //         Ble_Parse_Line((char*)ble_ctrl.line_buf);
+        //         ble_ctrl.line_idx = 0;
+        //     }
+        //     else if (rx_byte == '\n' || rx_byte == '\r') {
+        //         if (ble_ctrl.line_idx > 0) {
+        //             ble_ctrl.line_buf[ble_ctrl.line_idx] = '\0';
+        //             Ble_Parse_Line((char*)ble_ctrl.line_buf);
+        //             ble_ctrl.line_idx = 0;
+        //         }
+        //     }
+        //     else {
+        //         if (ble_ctrl.line_idx < BLE_RX_BUF_SIZE - 1) {
+        //             ble_ctrl.line_buf[ble_ctrl.line_idx++] = rx_byte;
+        //         }
+        //     }
+        // }
     }
 }
 

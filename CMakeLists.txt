@@ -29,6 +29,8 @@ project(${CMAKE_PROJECT_NAME} C CXX)
 message("Build type: " ${CMAKE_BUILD_TYPE})
 file(GLOB_RECURSE UI_SOURCES "ui/*.c")
 file(GLOB_RECURSE LINK_SOURCES "LinkProtocol/src/*.c")
+file(GLOB_RECURSE COMMANDS_SOURCES "commands/src/*.c")
+
 # Enable CMake support for ASM and C languages
 enable_language(C ASM)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -61,6 +63,8 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user sources here
     ${UI_SOURCES}
+    ${LINK_SOURCES}
+    ${COMMANDS_SOURCES}
     ${CMAKE_SOURCE_DIR}/Core/Src/atk_rgblcd.c
     ${CMAKE_SOURCE_DIR}/Core/Src/atk_rgblcd_ltdc.c
     ${CMAKE_SOURCE_DIR}/Core/Src/atk_rgblcd_touch_gtxx.c
@@ -74,6 +78,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/Core/Src/ble_client.c
     ${CMAKE_SOURCE_DIR}/Core/Src/app_ble.c
     ${CMAKE_SOURCE_DIR}/Core/Src/uint8_vector.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/auth_client.c
 )
 
 # Add include paths

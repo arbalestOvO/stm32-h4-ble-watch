@@ -23,10 +23,6 @@ TX_THREAD u3_to_u1_thread;
 uint8_t u1_to_u3_stack[BRIDGE_STACK_SIZE];
 uint8_t u3_to_u1_stack[BRIDGE_STACK_SIZE];
 
-// 2. 消息队列 (仅保留业务用的 U3->APP 队列)
-TX_QUEUE queue_u3_bt;
-uint8_t q_buffer_3_b[QUEUE_SIZE * sizeof(ULONG)];
-
 // 3. 事件标志组 (用于中断通知线程有数据到来)
 TX_EVENT_FLAGS_GROUP uart_event_flags;
 #define EVT_FLAG_U1_RX   (1 << 0)
@@ -53,10 +49,6 @@ void App_UART_Bridge_Init(void)
 {
     // 1. 创建事件标志组
     tx_event_flags_create(&uart_event_flags, "UART RX Events");
-
-    // 2. 创建 U3 -> APP 队列 (保持原有逻辑)
-    tx_queue_create(&queue_u3_bt, "Queue U3->APP", TX_1_ULONG,
-                q_buffer_3_b, sizeof(q_buffer_3_b));
 
     // 3. 创建处理线程
     tx_thread_create(&u1_to_u3_thread, "Thread U1->U3",
@@ -155,11 +147,6 @@ void Process_DMA_Buffer(UART_HandleTypeDef *huart, uint8_t *buffer, uint16_t buf
         if (is_u3) {
             HAL_UART_Transmit(&huart1, &buffer[current_read], len, UART_TX_TIMEOUT);
 
-            // 2. 只有 U3 需要发给 App Queue
-            for(int i=0; i<len; i++) {
-                ULONG msg = (ULONG)buffer[current_read + i];
-                tx_queue_send(&queue_u3_bt, &msg, TX_NO_WAIT);
-            }
         } else {
             // U1 -> U3
             HAL_UART_Transmit(&huart3, &buffer[current_read], len, UART_TX_TIMEOUT);
@@ -175,10 +162,7 @@ void Process_DMA_Buffer(UART_HandleTypeDef *huart, uint8_t *buffer, uint16_t buf
         {
             if (is_u3) {
                 HAL_UART_Transmit(&huart1, &buffer[current_read], len1, UART_TX_TIMEOUT);
-                for(int i=0; i<len1; i++) {
-                    ULONG msg = (ULONG)buffer[current_read + i];
-                    tx_queue_send(&queue_u3_bt, &msg, TX_NO_WAIT);
-                }
+
             } else {
                 HAL_UART_Transmit(&huart3, &buffer[current_read], len1, UART_TX_TIMEOUT);
             }
@@ -190,10 +174,7 @@ void Process_DMA_Buffer(UART_HandleTypeDef *huart, uint8_t *buffer, uint16_t buf
         {
             if (is_u3) {
                 HAL_UART_Transmit(&huart1, &buffer[0], len2, UART_TX_TIMEOUT);
-                for(int i=0; i<len2; i++) {
-                    ULONG msg = (ULONG)buffer[i];
-                    tx_queue_send(&queue_u3_bt, &msg, TX_NO_WAIT);
-                }
+
             } else {
                 HAL_UART_Transmit(&huart3, &buffer[0], len2, UART_TX_TIMEOUT);
             }

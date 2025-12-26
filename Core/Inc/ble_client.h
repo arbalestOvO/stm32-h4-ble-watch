@@ -17,7 +17,6 @@
 #define BLE_CONN_ID             0       // 默认连接ID
 
 /* ----------------外部依赖---------------- */
-extern TX_QUEUE queue_u3_bt;
 extern UART_HandleTypeDef huart3;
 
 /* ----------------事件标志位---------------- */

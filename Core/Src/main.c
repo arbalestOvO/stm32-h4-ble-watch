@@ -12,6 +12,7 @@
 #include "quadspi.h"
 #include "rng.h"
 #include "sdmmc.h"
+#include "spi.h"
 #include "usart.h"
 #include "gpio.h"
 #include "fmc.h"
@@ -29,6 +30,7 @@
 #include "lvgl.h"
 #include "stm32h7xx_hal_dma2d.h"
 #include "ui.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -70,7 +72,6 @@ void my_stack_error_handler(TX_THREAD *thread_ptr)
   */
 int main(void)
 {
-
   /* USER CODE BEGIN 1 */
   /* USER CODE END 1 */
 
@@ -112,6 +113,7 @@ int main(void)
   MX_DMA2D_Init();
   MX_LTDC_Init();
   MX_RNG_Init();
+  MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
   DWT_Delay_Init();
   sdram_init();
@@ -128,6 +130,7 @@ int main(void)
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_4, GPIO_PIN_SET);
   crypto_init();
   /* USER CODE END 2 */
+
   MX_ThreadX_Init();
 
   /* We should never get here as control is now taken by the scheduler */
