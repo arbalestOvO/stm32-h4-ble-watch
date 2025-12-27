@@ -131,6 +131,115 @@ target_link_libraries(esp_hosted_lib PRIVATE stm32cubemx)
 
 # ==============================================================================
 
+
+
+# =========================== NIMBLE-HOST ======================================
+
+
+set(NIMBLE_ROOT "mynewt-nimble")
+set(PORTING_ROOT "${NIMBLE_ROOT}/porting/npl/threadx")
+
+# ==============================================================================
+# 2. 预处理器宏定义
+# ==============================================================================
+add_definitions(
+        -DNIMBLE_CFG_CONTROLLER=0       # 仅编译 Host (STM32)，不编译 Controller
+        -DMYNEWT_VAL_BLE_HOST=1         # 启用 Host
+        -DTINYCRYPT_UECC_RNG_TRNG=0     # TinyCrypt 配置 (根据是否有硬件 RNG 调整)
+)
+
+# ==============================================================================
+# 3. 包含路径 (Include Directories)
+# ==============================================================================
+include_directories(
+        # 你的配置文件 syscfg.h 所在目录
+        "${CMAKE_CURRENT_SOURCE_DIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/Middlewares/ST/threadx/common/inc"
+
+        # NimBLE 核心 API
+        "${NIMBLE_ROOT}/nimble/include"
+        "${NIMBLE_ROOT}/nimble/host/include"
+        "${NIMBLE_ROOT}/nimble/host/src"       # 部分内部头文件可能在此
+        "${NIMBLE_ROOT}/nimble/host/services/gap/include"
+        "${NIMBLE_ROOT}/nimble/host/services/gatt/include"
+        "${NIMBLE_ROOT}/nimble/transport/include"
+        "${NIMBLE_ROOT}/nimble/host/store/ram/include"
+        "${NIMBLE_ROOT}/nimble/host/util/include"
+
+        # Porting Layer 公共头文件
+        "${NIMBLE_ROOT}/nimble/porting/nimble/include"
+        "${NIMBLE_ROOT}/porting/nimble/include"
+
+        # TinyCrypt (加密库)
+        "${NIMBLE_ROOT}/ext/tinycrypt/include"
+
+        # 自定义适配层头文件 (ThreadX NPL & SPI HCI)
+        "${PORTING_ROOT}/include"
+)
+
+# ==============================================================================
+# 4. 源文件集合 (Source Files)
+# ==============================================================================
+set(NIMBLE_SRCS "")
+
+# --- A. 核心协议栈 (Host Stack) ---
+file(GLOB_RECURSE NIMBLE_HOST_SRCS
+        "${NIMBLE_ROOT}/nimble/host/src/*.c"
+        "${NIMBLE_ROOT}/nimble/host/store/ram/src/*.c"
+        "${NIMBLE_ROOT}/nimble/host/util/src/*.c"
+)
+
+list(APPEND NIMBLE_SRCS ${NIMBLE_HOST_SRCS})
+
+# 1. Transport 核心管理 (解决 ble_transport_init 缺失)
+list(APPEND NIMBLE_SRCS "${NIMBLE_ROOT}/nimble/transport/src/transport.c")
+
+# --- B. 基础服务 (GATT Services) ---
+# 至少需要 GAP 和 GATT，其他按需添加
+file(GLOB NIMBLE_SVC_GAP_SRCS "${NIMBLE_ROOT}/nimble/host/services/gap/src/*.c")
+file(GLOB NIMBLE_SVC_GATT_SRCS "${NIMBLE_ROOT}/nimble/host/services/gatt/src/*.c")
+list(APPEND NIMBLE_SRCS ${NIMBLE_SVC_GAP_SRCS} ${NIMBLE_SVC_GATT_SRCS})
+
+# --- C. TinyCrypt (加密依赖) ---
+# NimBLE 依赖 TinyCrypt 进行配对加密
+file(GLOB TINYCRYPT_SRCS
+        "${NIMBLE_ROOT}/ext/tinycrypt/src/aes_encrypt.c"
+        "${NIMBLE_ROOT}/ext/tinycrypt/src/utils.c"
+        "${NIMBLE_ROOT}/ext/tinycrypt/src/cmac_mode.c"
+        "${NIMBLE_ROOT}/ext/tinycrypt/src/ecc.c"
+        "${NIMBLE_ROOT}/ext/tinycrypt/src/ecc_dh.c"
+        "${NIMBLE_ROOT}/ext/tinycrypt/src/sha256.c"
+)
+list(APPEND NIMBLE_SRCS ${TINYCRYPT_SRCS})
+
+# --- D. 通用移植层 (General Porting) ---
+# 这些是官方提供的 OS 无关的胶水代码
+list(APPEND NIMBLE_SRCS
+        "${NIMBLE_ROOT}/porting/nimble/src/endian.c"
+        "${NIMBLE_ROOT}/porting/nimble/src/mem.c"
+        "${NIMBLE_ROOT}/porting/nimble/src/nimble_port.c" # 包含 nimble_port_init
+        "${NIMBLE_ROOT}/porting/nimble/src/os_msys.c"     # Mynewt 内存缓冲管理
+        "${NIMBLE_ROOT}/porting/nimble/src/os_mbuf.c"     # Mynewt 内存缓冲管理
+        "${NIMBLE_ROOT}/porting/nimble/src/os_mempool.c"  # Mynewt 内存池管理
+)
+
+# --- E. [重点] 用户自定义适配层 (ThreadX & SPI) ---
+# 这里引用你必须手动实现的文件
+list(APPEND NIMBLE_SRCS
+        "${PORTING_ROOT}/src/npl_os_threadx.c"   # ThreadX NPL 适配
+        "${PORTING_ROOT}/src/ble_hci_spi.c"      # SPI HCI 传输层
+)
+
+# ==============================================================================
+# 5. 生成静态库
+# ==============================================================================
+add_library(nimble_host STATIC ${NIMBLE_SRCS})
+
+
+target_link_libraries(nimble_host PRIVATE stm32cubemx)
+
+# ==============================================================================
+
 # Link directories setup
 target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined library search paths
@@ -181,6 +290,7 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE LV_CONF_INCLUDE_SIMPLE 
 
 # Add linked libraries
 target_link_libraries(${CMAKE_PROJECT_NAME}
+    nimble_host
     esp_hosted_lib
     TF-PSA-Crypto::tfpsacrypto
     lvgl

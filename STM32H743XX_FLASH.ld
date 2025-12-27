@@ -185,6 +185,14 @@ SECTIONS
     __bss_end__ = _ebss;
   } >RAM
 
+  .dma_buffer :
+  {
+    . = ALIGN(32);    /* 32字节对齐，配合 Cache Line */
+    *(.dma_buffer)    /* 捕获所有名为 .dma_buffer 的输入段 */
+    *(.dma_buffer*)
+    . = ALIGN(32);
+  } >RAM_D2
+
   /* User_heap_stack section, used to check that there is enough RAM left */
   ._user_heap_stack :
   {
