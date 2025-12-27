@@ -104,8 +104,6 @@
   */
 
 /* Includes ------------------------------------------------------------------*/
-#include <stdio.h>
-
 #include "stm32h7xx_hal.h"
 
 /** @addtogroup STM32H7xx_HAL_Driver

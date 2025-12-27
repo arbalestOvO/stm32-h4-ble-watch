@@ -139,17 +139,11 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Alternate = GPIO_AF9_FDCAN1;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : BLE_HS_Pin */
-  GPIO_InitStruct.Pin = BLE_HS_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(BLE_HS_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : BLE_IRQ_Pin */
-  GPIO_InitStruct.Pin = BLE_IRQ_Pin;
+  /*Configure GPIO pins : BLE_HS_Pin BLE_IRQ_Pin */
+  GPIO_InitStruct.Pin = BLE_HS_Pin|BLE_IRQ_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_PULLDOWN;
-  HAL_GPIO_Init(BLE_IRQ_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /*Configure GPIO pin : BLE_CS_Pin */
   GPIO_InitStruct.Pin = BLE_CS_Pin;
@@ -159,6 +153,9 @@ void MX_GPIO_Init(void)
   HAL_GPIO_Init(BLE_CS_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
+  HAL_NVIC_SetPriority(EXTI4_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI4_IRQn);
+
   HAL_NVIC_SetPriority(EXTI9_5_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
 
