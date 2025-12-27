@@ -17,7 +17,7 @@ extern UART_HandleTypeDef huart1;
 // ============================================================================
 #define TX_BUFFER_SIZE  2048        // 缓冲区大小
 #define LOG_THREAD_STACK_SIZE 1024  // 打印任务的堆栈大小
-#define LOG_THREAD_PRIO 15          // 打印任务优先级
+#define LOG_THREAD_PRIO 8          // 打印任务优先级
 
 // ============================================================================
 //  全局变量定义 (内部状态)

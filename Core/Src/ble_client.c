@@ -1,260 +1,288 @@
-//
-// Created by 19571 on 2025/12/24.
-//
+/**
+ * android_ble_client.c
+ * NimBLE 1.7.0 Host Layer Implementation
+ */
 
 #include "ble_client.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
 
-#include <stdint.h>
+/* NimBLE Stack Headers */
+#include "host/ble_hs.h"
+#include "host/ble_uuid.h"
+#include "host/util/util.h"
+#include "services/gap/ble_svc_gap.h"
 
-#include "app_threadx.h"
+#define TAG "AndroidBLE"
 
+/* -------------------------------------------------------------------------- */
+/* 内部结构体与上下文                                                          */
+/* -------------------------------------------------------------------------- */
 
-Ble_Client_Ctrl_t ble_ctrl;
+// 上下文状态管理
+typedef struct {
+    uint16_t conn_handle;           // 当前连接句柄
+    bool connected;                 // 连接状态
+    android_ble_callbacks_t *cb;    // 应用层回调
+} android_ble_context_t;
 
-/* ================= 工具函数 ================= */
+static android_ble_context_t g_ble_ctx = {
+    .conn_handle = BLE_HS_CONN_HANDLE_NONE,
+    .connected = false,
+    .cb = NULL
+};
 
-// 将单字节Hex字符转为数字 ('A'->10)
-static uint8_t HexCharToByte(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+/* -------------------------------------------------------------------------- */
+/* 辅助函数                                                                   */
+/* -------------------------------------------------------------------------- */
+
+static void addr_to_str(const ble_addr_t *addr, char *dst) {
+    const uint8_t *u8p = addr->val;
+    sprintf(dst, "%02X:%02X:%02X:%02X:%02X:%02X",
+            u8p[5], u8p[4], u8p[3], u8p[2], u8p[1], u8p[0]);
+}
+
+static void print_uuid(const ble_uuid_t *uuid) {
+    char buf[BLE_UUID_STR_LEN];
+    ble_uuid_to_str(uuid, buf);
+    printf("%s", buf);
+}
+
+/* -------------------------------------------------------------------------- */
+/* GATT 回调函数 (内部使用)                                                    */
+/* -------------------------------------------------------------------------- */
+
+// MTU 交换回调
+static int on_mtu_exchanged(uint16_t conn_handle, const struct ble_gatt_error *error,
+                            uint16_t mtu, void *arg) {
+    if (g_ble_ctx.cb && g_ble_ctx.cb->on_mtu_changed) {
+        g_ble_ctx.cb->on_mtu_changed(conn_handle, mtu, error->status);
+    }
     return 0;
 }
 
-// 将Hex字符串转为二进制数组 ("AA01" -> {0xAA, 0x01})
-static void HexStrToBin(const char* hex, uint8_t* bin, uint16_t len) {
-    for (uint16_t i = 0; i < len; i++) {
-        bin[i] = (HexCharToByte(hex[i*2]) << 4) | HexCharToByte(hex[i*2 + 1]);
-    }
-}
-
-/* ================= 核心驱动 ================= */
-
-static TX_THREAD tx_app_thread;
-static uint8_t thread_stack[1024];
-void Ble_Client_Init(void) {
-
-    if (tx_thread_create(&tx_app_thread, "ble core thread", Ble_Client_Task_Entry, 0, thread_stack,
-                         512, TX_APP_THREAD_PRIO, TX_APP_THREAD_PREEMPTION_THRESHOLD,
-                         TX_APP_THREAD_TIME_SLICE, TX_APP_THREAD_AUTO_START) != TX_SUCCESS)
-    {
-        return;
-    }
-    memset(&ble_ctrl, 0, sizeof(Ble_Client_Ctrl_t));
-    tx_event_flags_create(&ble_ctrl.evt_flags, "BLE Flags");
-    tx_mutex_create(&ble_ctrl.lock, "BLE Mutex", TX_NO_INHERIT);
-}
-
-void Ble_RegisterRxCallback(Ble_RxCallback_t callback) {
-    ble_ctrl.rx_callback = callback;
-}
-
-// 通用命令发送 (内部使用)
-static UINT Ble_SendCmd(const char* cmd, ULONG expect_evt, ULONG timeout_ms) {
-    ULONG actual_flags;
-
-    tx_mutex_get(&ble_ctrl.lock, TX_WAIT_FOREVER);
-    tx_event_flags_set(&ble_ctrl.evt_flags, 0, TX_AND); // 清除标志
-
-    HAL_UART_Transmit(&huart3, (uint8_t*)cmd, strlen(cmd), 100);
-    HAL_UART_Transmit(&huart3, (uint8_t*)"\r\n", 2, 100);
-
-    ULONG ticks = (timeout_ms * TX_TIMER_TICKS_PER_SECOND) / 1000;
-    if(ticks == 0) ticks = 1;
-
-    UINT status = tx_event_flags_get(&ble_ctrl.evt_flags, expect_evt | BLE_EVT_CMD_ERROR,
-                                     TX_OR_CLEAR, &actual_flags, ticks);
-
-    tx_mutex_put(&ble_ctrl.lock);
-
-    if (status != TX_SUCCESS) return TX_NO_EVENTS;
-    if (actual_flags & BLE_EVT_CMD_ERROR) return TX_WAIT_ERROR;
-    return TX_SUCCESS;
-}
-
-/* ================= 接收任务与解析 ================= */
-
-// 解析Notify数据: +BLEGATTCNOTIFY:0,1,1,4,AABBCCDD
-static void Ble_Parse_Notify(char* line) {
-    // 简单解析示例，实际需根据逗号分割
-    // 假设格式固定，且最后一个参数是 Hex 数据
-    char* data_ptr = strrchr(line, ',');
-    if (data_ptr && ble_ctrl.rx_callback) {
-        data_ptr++; // 跳过逗号
-        uint16_t hex_len = strlen(data_ptr);
-        if (hex_len % 2 == 0 && hex_len > 0) {
-            uint8_t temp_buf[128]; // 临时缓冲
-            uint16_t bin_len = hex_len / 2;
-            if (bin_len > sizeof(temp_buf)) bin_len = sizeof(temp_buf);
-
-            HexStrToBin(data_ptr, temp_buf, bin_len);
-            ble_ctrl.rx_callback(temp_buf, bin_len);
+// 读操作回调
+static int on_read_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
+                      struct ble_gatt_attr *attr, void *arg) {
+    if (g_ble_ctx.cb && g_ble_ctx.cb->on_characteristic_read) {
+        uint8_t *data = NULL;
+        uint16_t len = 0;
+        // 注意：这里简化处理，仅获取 mbuf 链的第一个块。
+        // 如果数据很长，可能需要遍历 attr->om 链表。
+        if (attr && attr->om) {
+            data = attr->om->om_data;
+            len = attr->om->om_len;
         }
+        g_ble_ctx.cb->on_characteristic_read(conn_handle, error->status,
+                                            attr ? attr->handle : 0, data, len);
+    }
+    return 0;
+}
+
+// 写操作回调
+static int on_write_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
+                       struct ble_gatt_attr *attr, void *arg) {
+    if (g_ble_ctx.cb && g_ble_ctx.cb->on_characteristic_write) {
+        g_ble_ctx.cb->on_characteristic_write(conn_handle, error->status, attr ? attr->handle : 0);
+    }
+    return 0;
+}
+
+// 特征发现回调
+static int on_chr_disc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
+                          const struct ble_gatt_chr *chr, void *arg) {
+    if (error->status == BLE_HS_EDONE) {
+        // 单个服务的特征发现结束，我们这里简化逻辑，
+        // 假设所有服务的特征发现都完成后再触发 on_services_discovered
+        // 实际复杂的实现需要计数器或状态机
+        if (g_ble_ctx.cb && g_ble_ctx.cb->on_services_discovered) {
+            g_ble_ctx.cb->on_services_discovered(conn_handle, 0);
+        }
+        return 0;
+    }
+
+    if (error->status != 0) {
+        printf("Error discovering characteristics: %d\n", error->status);
+        return 0;
+    }
+
+    // 调试日志：打印发现的特征
+    // printf("Discovered Characteristic: UUID=");
+    // print_uuid(&chr->uuid.u);
+    // printf(", Handle=%d\n", chr->val_handle);
+
+    return 0;
+}
+
+// 服务发现回调
+static int on_svc_disc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
+                          const struct ble_gatt_svc *service, void *arg) {
+    if (error->status == BLE_HS_EDONE) {
+        return 0;
+    }
+
+    if (error->status != 0) {
+        printf("Error discovering services: %d\n", error->status);
+        return 0;
+    }
+
+    // printf("Discovered Service: UUID=");
+    // print_uuid(&service->uuid.u);
+    // printf("\n");
+
+    // 发现服务后，立即递归发现该服务下的特征
+    ble_gattc_disc_all_chrs(conn_handle, service->start_handle, service->end_handle,
+                            on_chr_disc_cb, NULL);
+
+    return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* GAP 事件处理 (连接、扫描、通知)                                             */
+/* -------------------------------------------------------------------------- */
+
+static int ble_gap_event(struct ble_gap_event *event, void *arg) {
+    switch (event->type) {
+        case BLE_GAP_EVENT_CONNECT:
+            if (event->connect.status == 0) {
+                g_ble_ctx.connected = true;
+                g_ble_ctx.conn_handle = event->connect.conn_handle;
+                if (g_ble_ctx.cb && g_ble_ctx.cb->on_connection_state_change) {
+                    g_ble_ctx.cb->on_connection_state_change(event->connect.conn_handle, 0, 2); // 2 = Connected
+                }
+            } else {
+                if (g_ble_ctx.cb && g_ble_ctx.cb->on_connection_state_change) {
+                    g_ble_ctx.cb->on_connection_state_change(BLE_HS_CONN_HANDLE_NONE, event->connect.status, 0);
+                }
+            }
+            break;
+
+        case BLE_GAP_EVENT_DISCONNECT:
+            g_ble_ctx.connected = false;
+            g_ble_ctx.conn_handle = BLE_HS_CONN_HANDLE_NONE;
+            if (g_ble_ctx.cb && g_ble_ctx.cb->on_connection_state_change) {
+                g_ble_ctx.cb->on_connection_state_change(event->disconnect.conn.conn_handle, 0, 0); // 0 = Disconnected
+            }
+            break;
+
+        case BLE_GAP_EVENT_DISC:
+            if (g_ble_ctx.cb && g_ble_ctx.cb->on_scan_result) {
+                char addr_str[20];
+                addr_to_str(&event->disc.addr, addr_str);
+                g_ble_ctx.cb->on_scan_result(addr_str, event->disc.rssi,
+                                             (const uint8_t *)event->disc.data, event->disc.length_data);
+            }
+            break;
+
+        case BLE_GAP_EVENT_NOTIFY_RX:
+            if (g_ble_ctx.cb && g_ble_ctx.cb->on_characteristic_changed) {
+                 uint8_t *data = NULL;
+                 uint16_t len = 0;
+                 if (event->notify_rx.om) {
+                     data = event->notify_rx.om->om_data;
+                     len = event->notify_rx.om->om_len;
+                 }
+                 g_ble_ctx.cb->on_characteristic_changed(event->notify_rx.conn_handle,
+                                                         event->notify_rx.attr_handle,
+                                                         data, len);
+            }
+            break;
+
+        case BLE_GAP_EVENT_MTU:
+            // 此事件通常由对端发起 MTU 交换时触发，若是主动请求，结果会在 on_mtu_exchanged 中返回
+            // 这里可以处理被动更新的情况
+            if (g_ble_ctx.cb && g_ble_ctx.cb->on_mtu_changed) {
+                g_ble_ctx.cb->on_mtu_changed(event->mtu.conn_handle, event->mtu.value, 0);
+            }
+            break;
+    }
+    return 0;
+}
+
+/* -------------------------------------------------------------------------- */
+/* API 实现                                                                   */
+/* -------------------------------------------------------------------------- */
+
+void android_ble_init(android_ble_callbacks_t *callbacks) {
+    g_ble_ctx.cb = callbacks;
+}
+
+int android_ble_start_scan(void) {
+    struct ble_gap_disc_params disc_params;
+
+    // 参数配置：被动扫描，不启用白名单
+    disc_params.filter_duplicates = 0;
+    disc_params.passive = 0;
+    disc_params.itvl = 0;
+    disc_params.window = 0;
+    disc_params.filter_policy = 0;
+    disc_params.limited = 0;
+
+    return ble_gap_disc(0, 2000, &disc_params, ble_gap_event, NULL);
+}
+
+int android_ble_stop_scan(void) {
+    if (ble_gap_disc_active()) {
+        return ble_gap_disc_cancel();
+    }
+    return 0;
+}
+
+int android_ble_connect(const char *addr_str, uint8_t addr_type) {
+    ble_addr_t addr;
+    unsigned int mac[6];
+
+    // 简单的 MAC 解析
+    if (sscanf(addr_str, "%2x:%2x:%2x:%2x:%2x:%2x",
+               &mac[5], &mac[4], &mac[3], &mac[2], &mac[1], &mac[0]) != 6) {
+        return BLE_HS_EINVAL;
+    }
+
+    for(int i=0; i<6; i++) {
+        addr.val[i] = (uint8_t)mac[i];
+    }
+    addr.type = addr_type;
+
+    return ble_gap_connect(0, &addr, BLE_HS_FOREVER, NULL, ble_gap_event, NULL);
+}
+
+int android_ble_disconnect(void) {
+    if (!g_ble_ctx.connected) return BLE_HS_ENOTCONN;
+    return ble_gap_terminate(g_ble_ctx.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
+}
+
+int android_ble_discover_services(void) {
+    if (!g_ble_ctx.connected) return BLE_HS_ENOTCONN;
+    return ble_gattc_disc_all_svcs(g_ble_ctx.conn_handle, on_svc_disc_cb, NULL);
+}
+
+int android_ble_read_char(uint16_t char_handle) {
+    if (!g_ble_ctx.connected) return BLE_HS_ENOTCONN;
+    return ble_gattc_read(g_ble_ctx.conn_handle, char_handle, on_read_cb, NULL);
+}
+
+int android_ble_write_char(uint16_t char_handle, const uint8_t *data, uint16_t len, int type) {
+    if (!g_ble_ctx.connected) return BLE_HS_ENOTCONN;
+
+    if (type == 1) { // No Response
+        return ble_gattc_write_no_rsp_flat(g_ble_ctx.conn_handle, char_handle, data, len);
+    } else { // With Response
+        return ble_gattc_write_flat(g_ble_ctx.conn_handle, char_handle, data, len, on_write_cb, NULL);
     }
 }
 
-static void Ble_Parse_Line(char* line) {
-    if (strncmp(line, "OK", 2) == 0) {
-        tx_event_flags_set(&ble_ctrl.evt_flags, BLE_EVT_CMD_OK, TX_OR);
-    }
-    else if (strncmp(line, "ERROR", 5) == 0) {
-        tx_event_flags_set(&ble_ctrl.evt_flags, BLE_EVT_CMD_ERROR, TX_OR);
-    }
-    else if (line[0] == '>') { // 等待数据输入提示符
-        tx_event_flags_set(&ble_ctrl.evt_flags, BLE_EVT_WAIT_DATA, TX_OR);
-    }
-    else if (strstr(line, "connected")) {
-        ble_ctrl.is_connected = 1;
-        tx_event_flags_set(&ble_ctrl.evt_flags, BLE_EVT_CONN_SUCCESS, TX_OR);
-    }
-    else if (strstr(line, "terminated")) {
-        ble_ctrl.is_connected = 0;
-        ble_ctrl.is_spp_mode = 0; // 断开连接自动退出SPP
-        tx_event_flags_set(&ble_ctrl.evt_flags, BLE_EVT_DISCONNECTED, TX_OR);
-    }
-    // 处理Notify/Indicate数据
-    else if (strstr(line, "+BLEGATTCNOTIFY:") || strstr(line, "+BLEGATTCIND:")) {
-        Ble_Parse_Notify(line);
-    }
+int android_ble_enable_notification(uint16_t cccd_handle, bool enable, bool is_indication) {
+    if (!g_ble_ctx.connected) return BLE_HS_ENOTCONN;
+
+    uint8_t value[2];
+    value[0] = enable ? (is_indication ? 0x02 : 0x01) : 0x00;
+    value[1] = 0x00;
+
+    return ble_gattc_write_flat(g_ble_ctx.conn_handle, cccd_handle, value, sizeof(value), on_write_cb, NULL);
 }
 
-void Ble_Client_Task_Entry(ULONG thread_input) {
-    uint8_t rx_byte;
-
-    while(1) {
-        // 改成spi的队列
-        // if (tx_queue_receive(&queue_u3_bt, &rx_byte, TX_WAIT_FOREVER) == TX_SUCCESS) {
-        //
-        //     // --- SPP 模式处理 ---
-        //     if (ble_ctrl.is_spp_mode) {
-        //         // 在SPP模式下，直接透传给应用层
-        //         // 为提高效率，可以积攒几个字节再回调，或者每字节回调
-        //         if (ble_ctrl.rx_callback) {
-        //             ble_ctrl.rx_callback(&rx_byte, 1);
-        //         }
-        //         // 注意：这里需要一种机制检测退出透传的标志（如"+++"回复等），
-        //         // 但通常退出由发送端控制，接收端只管收数据。
-        //         continue;
-        //     }
-        //
-        //     // --- AT 模式处理 (解析 '\r\n') ---
-        //     if (rx_byte == '>') {
-        //         // 特殊处理 '>' 提示符，它可能没有回车换行
-        //         ble_ctrl.line_buf[0] = '>';
-        //         ble_ctrl.line_buf[1] = '\0';
-        //         Ble_Parse_Line((char*)ble_ctrl.line_buf);
-        //         ble_ctrl.line_idx = 0;
-        //     }
-        //     else if (rx_byte == '\n' || rx_byte == '\r') {
-        //         if (ble_ctrl.line_idx > 0) {
-        //             ble_ctrl.line_buf[ble_ctrl.line_idx] = '\0';
-        //             Ble_Parse_Line((char*)ble_ctrl.line_buf);
-        //             ble_ctrl.line_idx = 0;
-        //         }
-        //     }
-        //     else {
-        //         if (ble_ctrl.line_idx < BLE_RX_BUF_SIZE - 1) {
-        //             ble_ctrl.line_buf[ble_ctrl.line_idx++] = rx_byte;
-        //         }
-        //     }
-        // }
-    }
-}
-
-/* ================= 业务接口实现 ================= */
-
-UINT Ble_Init_Role(void) { return Ble_SendCmd("AT+BLEINIT=1", BLE_EVT_CMD_OK, 2000); }
-UINT Ble_Start_Scan(void) { return Ble_SendCmd("AT+BLESCAN=1", BLE_EVT_CMD_OK, 2000); }
-UINT Ble_Stop_Scan(void) { return Ble_SendCmd("AT+BLESCAN=0", BLE_EVT_CMD_OK, 2000); }
-UINT Ble_Gattc_DiscoverPrimaryService(void) { return Ble_SendCmd("AT+BLEGATTCPRIMSRV=0", BLE_EVT_CMD_OK, 2000); }
-UINT Ble_Gattc_DiscoverChar(uint16_t srv_index) {
-    char cmd[32]; snprintf(cmd, 32, "AT+BLEGATTCCHAR=0,%d", srv_index);
-    return Ble_SendCmd(cmd, BLE_EVT_CMD_OK, 2000);
-}
-
-// 连接
-UINT Ble_Connect(const char* mac_addr) {
-    char cmd[64];
-    snprintf(cmd, 64, "AT+BLECONN=0,\"%s\"", mac_addr);
-
-    // 先等OK
-    if (Ble_SendCmd(cmd, BLE_EVT_CMD_OK, 2000) != TX_SUCCESS) return TX_WAIT_ERROR;
-
-    // 再等Connected事件 (最多10秒)
-    ULONG actual;
-    if (tx_event_flags_get(&ble_ctrl.evt_flags, BLE_EVT_CONN_SUCCESS, TX_OR, &actual,
-        (10000 * TX_TIMER_TICKS_PER_SECOND)/1000) == TX_SUCCESS) {
-        return TX_SUCCESS;
-    }
-    return TX_NO_EVENTS;
-}
-
-// GATT 写数据
-UINT Ble_Gattc_Write(uint16_t srv_index, uint16_t char_index, uint8_t *data, uint16_t len) {
-    char cmd[64];
-    ULONG actual;
-
-    tx_mutex_get(&ble_ctrl.lock, TX_WAIT_FOREVER);
-    tx_event_flags_set(&ble_ctrl.evt_flags, 0, TX_AND);
-
-    // 1. 发送写请求头: AT+BLEGATTCWR=0,srv,char,len
-    snprintf(cmd, 64, "AT+BLEGATTCWR=0,%d,%d,%d", srv_index, char_index, len);
-    HAL_UART_Transmit(&huart3, (uint8_t*)cmd, strlen(cmd), 100);
-    HAL_UART_Transmit(&huart3, (uint8_t*)"\r\n", 2, 100);
-
-    // 2. 等待 '>' 提示符
-    UINT status = tx_event_flags_get(&ble_ctrl.evt_flags, BLE_EVT_WAIT_DATA | BLE_EVT_CMD_ERROR,
-                                     TX_OR_CLEAR, &actual, 200); // 200ms等待提示符
-
-    if (status == TX_SUCCESS && (actual & BLE_EVT_WAIT_DATA)) {
-        // 3. 发送实际数据 (不带\r\n)
-        HAL_UART_Transmit(&huart3, data, len, 100);
-
-        // 4. 等待 OK
-        status = tx_event_flags_get(&ble_ctrl.evt_flags, BLE_EVT_CMD_OK, TX_OR_CLEAR, &actual, 1000);
-    } else {
-        status = TX_WAIT_ERROR;
-    }
-
-    tx_mutex_put(&ble_ctrl.lock);
-    return status;
-}
-
-// 进入 SPP 模式
-UINT Ble_Enter_SPP(void) {
-    if (Ble_SendCmd("AT+BLESPPCFG=1,1,1,1,1", BLE_EVT_CMD_OK, 2000) != TX_SUCCESS) {
-        // 配置SPP参数(可选，根据手册)
-    }
-
-    if (Ble_SendCmd("AT+BLESPP", BLE_EVT_CMD_OK, 2000) == TX_SUCCESS) {
-        ble_ctrl.is_spp_mode = 1; // 切换状态机模式
-        return TX_SUCCESS;
-    }
-    return TX_WAIT_ERROR;
-}
-
-// SPP 发送 (直接透传)
-UINT Ble_SPP_Send(uint8_t *data, uint16_t len) {
-    if (!ble_ctrl.is_spp_mode) return TX_WAIT_ERROR;
-
-    tx_mutex_get(&ble_ctrl.lock, TX_WAIT_FOREVER);
-    HAL_UART_Transmit(&huart3, data, len, 500);
-    tx_mutex_put(&ble_ctrl.lock);
-
-    return TX_SUCCESS;
-}
-
-// 退出 SPP (通常是发送 +++ 并不带回车，具体看模块)
-UINT Ble_Exit_SPP(void) {
-    tx_mutex_get(&ble_ctrl.lock, TX_WAIT_FOREVER);
-    HAL_UART_Transmit(&huart3, (uint8_t*)"+++", 3, 100);
-    tx_thread_sleep(100); // 等待模块反应
-    tx_mutex_put(&ble_ctrl.lock);
-
-    // 发送AT测试看是否退出成功
-    if (Ble_SendCmd("AT", BLE_EVT_CMD_OK, 1000) == TX_SUCCESS) {
-        ble_ctrl.is_spp_mode = 0;
-        return TX_SUCCESS;
-    }
-    return TX_WAIT_ERROR;
+int android_ble_request_mtu(int mtu) {
+    if (!g_ble_ctx.connected) return BLE_HS_ENOTCONN;
+    return ble_gattc_exchange_mtu(g_ble_ctx.conn_handle, on_mtu_exchanged, NULL);
 }

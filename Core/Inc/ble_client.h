@@ -1,88 +1,148 @@
-//
-// Created by 19571 on 2025/12/24.
-//
+/**
+ * android_ble_client.h
+ * * 这是一个基于 Apache NimBLE host stack 的封装层，旨在提供
+ * 类似于 Android BluetoothGatt 和 BluetoothLeScanner 的 C 语言接口。
+ */
 
-#ifndef ABOLUO_EXIT_BLE_CLIENT_H
-#define ABOLUO_EXIT_BLE_CLIENT_H
+#ifndef ANDROID_BLE_CLIENT_H
+#define ANDROID_BLE_CLIENT_H
 
-#include "tx_api.h"
-#include "stm32h7xx_hal.h"
-#include <string.h>
-#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
 
-/* ----------------配置参数---------------- */
-#define BLE_RX_BUF_SIZE         512     // 行缓冲区大小
-#define BLE_DEFAULT_TIMEOUT     2000    // 默认超时(ms)
-#define BLE_CONNECT_TIMEOUT     10000   // 连接超时(ms)
-#define BLE_CONN_ID             0       // 默认连接ID
+#ifdef __cplusplus
+extern "C" {
+#endif
 
-/* ----------------外部依赖---------------- */
-extern UART_HandleTypeDef huart3;
+/* -------------------------------------------------------------------------- */
+/* 回调定义 (对应 BluetoothGattCallback / ScanCallback)                       */
+/* -------------------------------------------------------------------------- */
 
-/* ----------------事件标志位---------------- */
-#define BLE_EVT_CMD_OK          0x00000001
-#define BLE_EVT_CMD_ERROR       0x00000002
-#define BLE_EVT_CONN_SUCCESS    0x00000004
-#define BLE_EVT_DISCONNECTED    0x00000008
-#define BLE_EVT_WAIT_DATA       0x00000020  // 等待输入数据 (收到 '>')
-
-/* ----------------类型定义---------------- */
-// 数据接收回调函数类型
-// data: 接收到的数据指针
-// len: 数据长度
-typedef void (*Ble_RxCallback_t)(uint8_t *data, uint16_t len);
-
-/* ----------------控制块结构体---------------- */
 typedef struct {
-    TX_EVENT_FLAGS_GROUP    evt_flags;
-    TX_MUTEX                lock;
+    /**
+     * 对应 onScanResult
+     * @param addr_str 设备地址字符串 (e.g. "11:22:33:AA:BB:CC")
+     * @param rssi 信号强度
+     * @param adv_data 广播数据指针
+     * @param adv_len 广播数据长度
+     */
+    void (*on_scan_result)(const char *addr_str, int rssi, const uint8_t *adv_data, int adv_len);
 
-    uint8_t                 line_buf[BLE_RX_BUF_SIZE];
-    uint16_t                line_idx;
+    /**
+     * 对应 onConnectionStateChange
+     * @param conn_handle 连接句柄
+     * @param status 操作状态 (0 为成功)
+     * @param new_state 新状态 (0: Disconnected, 2: Connected)
+     */
+    void (*on_connection_state_change)(uint16_t conn_handle, int status, int new_state);
 
-    volatile uint8_t        is_initialized;
-    volatile uint8_t        is_connected;
-    volatile uint8_t        is_spp_mode;    // 是否处于透传模式
+    /**
+     * 对应 onServicesDiscovered
+     * @param conn_handle 连接句柄
+     * @param status 操作状态
+     */
+    void (*on_services_discovered)(uint16_t conn_handle, int status);
 
-    Ble_RxCallback_t        rx_callback;    // 应用层注册的接收回调
+    /**
+     * 对应 onCharacteristicRead
+     */
+    void (*on_characteristic_read)(uint16_t conn_handle, int status, uint16_t char_handle, const uint8_t *data, uint16_t len);
 
-} Ble_Client_Ctrl_t;
+    /**
+     * 对应 onCharacteristicWrite
+     */
+    void (*on_characteristic_write)(uint16_t conn_handle, int status, uint16_t char_handle);
 
-extern Ble_Client_Ctrl_t ble_ctrl;
+    /**
+     * 对应 onCharacteristicChanged (Notify/Indicate)
+     */
+    void (*on_characteristic_changed)(uint16_t conn_handle, uint16_t char_handle, const uint8_t *data, uint16_t len);
 
-/* ----------------API 接口---------------- */
-void Ble_Client_Init(void);
-void Ble_Client_Task_Entry(ULONG thread_input);
+    /**
+     * 对应 onMtuChanged
+     */
+    void (*on_mtu_changed)(uint16_t conn_handle, int mtu, int status);
 
-// 注册接收回调
-void Ble_RegisterRxCallback(Ble_RxCallback_t callback);
+} android_ble_callbacks_t;
 
-// 基础控制
-UINT Ble_Init_Role(void);
-UINT Ble_Start_Scan(void);
-UINT Ble_Stop_Scan(void);
-UINT Ble_Connect(const char* mac_addr);
-UINT Ble_Disconnect(void);
-
-// GATT 数据操作
-UINT Ble_Gattc_DiscoverPrimaryService(void);
-UINT Ble_Gattc_DiscoverChar(uint16_t srv_index);
+/* -------------------------------------------------------------------------- */
+/* API 接口                                                                   */
+/* -------------------------------------------------------------------------- */
 
 /**
- * @brief 向特征值写入数据 (非透传)
- * @param srv_index 服务索引
- * @param char_index 特征值索引
- * @param data 数据指针
+ * 初始化 BLE 客户端模块
+ * @param callbacks 回调函数结构体指针
+ */
+void android_ble_init(android_ble_callbacks_t *callbacks);
+
+/**
+ * 对应 BluetoothLeScanner.startScan()
+ * 开始扫描 BLE 设备
+ * @return 0 表示成功，非 0 表示错误码
+ */
+int android_ble_start_scan(void);
+
+/**
+ * 对应 BluetoothLeScanner.stopScan()
+ * 停止扫描
+ */
+int android_ble_stop_scan(void);
+
+/**
+ * 对应 BluetoothDevice.connectGatt()
+ * 连接到指定设备
+ * @param addr_str 目标设备地址字符串 (格式 "XX:XX:XX:XX:XX:XX")
+ * @param addr_type 地址类型 (0: Public, 1: Random)
+ */
+int android_ble_connect(const char *addr_str, uint8_t addr_type);
+
+/**
+ * 对应 BluetoothGatt.disconnect()
+ * 断开当前连接
+ */
+int android_ble_disconnect(void);
+
+/**
+ * 对应 BluetoothGatt.discoverServices()
+ * 发现服务（这会递归触发发现特征值）
+ */
+int android_ble_discover_services(void);
+
+/**
+ * 对应 BluetoothGatt.readCharacteristic()
+ * 读取特征值
+ * @param char_handle 特征值的 Attribute Handle (注意：不是 UUID)
+ */
+int android_ble_read_char(uint16_t char_handle);
+
+/**
+ * 对应 BluetoothGatt.writeCharacteristic()
+ * 写入特征值
+ * @param char_handle 特征值的 Attribute Handle
+ * @param data 要写入的数据
  * @param len 数据长度
+ * @param type 写入类型 (1: No Response, 2: With Response)
  */
-UINT Ble_Gattc_Write(uint16_t srv_index, uint16_t char_index, uint8_t *data, uint16_t len);
+int android_ble_write_char(uint16_t char_handle, const uint8_t *data, uint16_t len, int type);
 
-// 透传/SPP 操作
-UINT Ble_Enter_SPP(void);
 /**
- * @brief SPP透传模式发送数据
+ * 对应 BluetoothGatt.setCharacteristicNotification() + writeDescriptor()
+ * 启用或禁用通知/指示
+ * @param cccd_handle 该特征对应的 CCCD (Client Characteristic Configuration Descriptor) Handle
+ * @param enable true 开启, false 关闭
+ * @param is_indication true 为 Indication, false 为 Notification
  */
-UINT Ble_SPP_Send(uint8_t *data, uint16_t len);
-UINT Ble_Exit_SPP(void); // 退出透传
+int android_ble_enable_notification(uint16_t cccd_handle, bool enable, bool is_indication);
 
-#endif //ABOLUO_EXIT_BLE_CLIENT_H
+/**
+ * 对应 BluetoothGatt.requestMtu()
+ * 请求更改 MTU 大小
+ * @param mtu 请求的 MTU 大小 (通常最大 517)
+ */
+int android_ble_request_mtu(int mtu);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // ANDROID_BLE_CLIENT_H

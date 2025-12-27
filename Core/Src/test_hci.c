@@ -48,12 +48,7 @@ void ble_store_ram_init(void);
 /* ----------------------------------------------------------------
  * 辅助函数：打印 MAC 地址
  * ---------------------------------------------------------------- */
-void print_addr(const void *addr) {
-    const uint8_t *u8p;
-    u8p = addr;
-    console_printf("%02x:%02x:%02x:%02x:%02x:%02x",
-                   u8p[5], u8p[4], u8p[3], u8p[2], u8p[1], u8p[0]);
-}
+void print_addr(const void *addr);
 
 /* ----------------------------------------------------------------
  * GAP 事件回调：处理扫描到的结果
@@ -106,7 +101,7 @@ static void scan(void) {
     disc_params.window = 0;            /* 0 表示使用默认值 */
 
     /* 3. 开始扫描 (持续时间: BLE_HS_FOREVER 表示一直扫) */
-    rc = ble_gap_disc(own_addr_type, 20000, &disc_params, gap_event, NULL);
+    rc = ble_gap_disc(own_addr_type, 5000, &disc_params, gap_event, NULL);
     if (rc != 0) {
         console_printf("错误: 启动扫描失败; rc=%d\n", rc);
     } else {
@@ -133,9 +128,6 @@ static void on_sync(void) {
         print_addr(addr_val);
         console_printf("\n");
     }
-
-    /* 启动扫描 */
-    scan();
 }
 
 /* ----------------------------------------------------------------

@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include "stm32h7xx_hal.h"
 #include "build/Release/_deps/lvgl-src/src/misc/lv_timer.h"
+#include "ui_protocol_type.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -51,9 +52,8 @@ TX_THREAD tx_app_thread;
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
-
+void await_and_handle_queue(void);
 /* USER CODE END PFP */
-
 /**
   * @brief  Application ThreadX Initialization.
   * @param memory_ptr: memory pointer
@@ -83,7 +83,11 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
   }
 
   /* USER CODE BEGIN App_ThreadX_Init */
+  UINT msg_size_in_words = sizeof(ui_message_t) / 4;
+  if (sizeof(ui_message_t) % 4 != 0) msg_size_in_words++;
 
+  tx_queue_create(&g_ui_queue, "Global UI Queue", msg_size_in_words,
+                  g_ui_queue_buffer, sizeof(g_ui_queue_buffer));
   /* USER CODE END App_ThreadX_Init */
 
   return ret;
@@ -98,6 +102,7 @@ void tx_app_thread_entry(ULONG thread_input)
   /* USER CODE BEGIN tx_app_thread_entry */
   while (1) {
     lv_timer_handler(); // 处理UI绘制任务
+    await_and_handle_queue();
     tx_thread_sleep(3);       // 必须有短暂延时，给系统喘息
   }
   /* USER CODE END tx_app_thread_entry */
@@ -122,5 +127,19 @@ void MX_ThreadX_Init(void)
 }
 
 /* USER CODE BEGIN 1 */
+void await_and_handle_queue(void) {
+  ui_message_t recv_msg;
+  while (tx_queue_receive(&g_ui_queue, &recv_msg, TX_NO_WAIT) == TX_SUCCESS) {
 
+    // --- 分发器逻辑 ---
+    switch (recv_msg.type) {
+      case UI_EVENT_BLE_FOUND:
+
+        break;
+      default:
+        // 未知消息类型
+        break;
+    }
+  }
+}
 /* USER CODE END 1 */
