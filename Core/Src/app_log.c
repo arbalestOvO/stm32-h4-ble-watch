@@ -158,6 +158,33 @@ void print_current_thread_stack_info(void)
     printf("------------------------\r\n");
 }
 
+void print_hex(const char *tag, const uint8_t *data, size_t len)  {
+    if (tag != NULL) {
+        printf("[%s] Length: %zu bytes\n", tag, len);
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        // 每 16 个字节换一行，并打印当前偏移量
+        if (i % 16 == 0) {
+            printf("%04zx: ", i);
+        }
+
+        // 打印字节的16进制值
+        printf("%02X ", data[i]);
+
+        // 每行结束时换行
+        if ((i + 1) % 16 == 0) {
+            printf("\n");
+        }
+    }
+
+    // 如果最后一行没满 16 个字节，补充一个换行
+    if (len % 16 != 0) {
+        printf("\n");
+    }
+    printf("\n");
+}
+
 /**
  * @brief  打印任务入口函数
  */

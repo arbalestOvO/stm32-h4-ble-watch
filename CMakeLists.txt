@@ -276,6 +276,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/commands/inc
     ${CMAKE_CURRENT_SOURCE_DIR}/LinkProtocol/include
     ${lvgl_SOURCE_DIR}
     ${lvgl_SOURCE_DIR}/src

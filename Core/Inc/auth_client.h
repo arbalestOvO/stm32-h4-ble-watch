@@ -18,6 +18,20 @@ typedef enum {
 typedef enum {
     AUTH_STATE_AUTHENTICATED,
     AUTH_STATE_WAIT_0101,
+    AUTH_STATE_WAIT_0133,
+    AUTH_STATE_WAIT_012C,
+    AUTH_STATE_WAIT_0128,
+    AUTH_STATE_WAIT_0107,
+    AUTH_STATE_WAIT_0105,
+    AUTH_STATE_WAIT_0102,
+    AUTH_STATE_WAIT_0103,
+    AUTH_STATE_WAIT_0137,
+    AUTH_STATE_WAIT_0131,
+    AUTH_STATE_WAIT_0130,
+    AUTH_STATE_WAIT_013F,
+    AUTH_STATE_WAIT_013E,
+    AUTH_STATE_WAIT_0135,
+    AUTH_STATE_WAIT_1A05,
     AUTH_STATE_FAILED
 } AuthState_t;
 
@@ -41,6 +55,7 @@ typedef struct {
 
     int timeout_ms;
     AuthState_t state;
+    uint8_t hichainStep;
 
     TX_QUEUE tx_queue;
     void* queue_mem;
@@ -48,12 +63,12 @@ typedef struct {
     uint32_t temp_asm_len;    // 当前已拼凑长度
     uint8_t  next_fsn;        // 下一个期望的序号
 
-
+    char uuid[33];
     char mac[16];
+    uint8_t pinCode[64];
     uint8_t *last_buf;
     uint32_t last_len;
 } AuthContext_t;
-
 typedef int (*CmdHandlerFunc)(AuthContext_t* ctx, uint8_t* data, int len);
 
 typedef struct {

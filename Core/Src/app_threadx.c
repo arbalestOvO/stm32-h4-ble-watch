@@ -28,6 +28,7 @@
 #include "ui_message_handler.h"
 #include "build/Release/_deps/lvgl-src/src/misc/lv_timer.h"
 #include "ui_protocol_type.h"
+#include "cJSON.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -61,6 +62,30 @@ void gui_init_threadx_setup() {
 /* USER CODE BEGIN PFP */
 void await_and_handle_queue(void);
 TX_THREAD * g_gui_thread_ptr;
+TX_BYTE_POOL *app_byte_pool;
+void* tx_cjson_malloc(size_t size) {
+  void* ptr = NULL;
+  // 使用 TX_NO_WAIT 或短超时，防止解析死锁
+  UINT status = tx_byte_allocate(app_byte_pool, &ptr, size, TX_WAIT_FOREVER);
+  if (status == TX_SUCCESS) {
+    return ptr;
+  }
+  return NULL;
+}
+
+// 2. 封装 free
+void tx_cjson_free(void* ptr) {
+  if (ptr) {
+    tx_byte_release(ptr);
+  }
+}
+
+void app_json_init() {
+  cJSON_Hooks hooks;
+  hooks.malloc_fn = tx_cjson_malloc;
+  hooks.free_fn = tx_cjson_free;
+  cJSON_InitHooks(&hooks);
+}
 /* USER CODE END PFP */
 /**
   * @brief  Application ThreadX Initialization.
@@ -91,6 +116,8 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
   }
 
   /* USER CODE BEGIN App_ThreadX_Init */
+  app_byte_pool = byte_pool;
+  app_json_init();
   gui_init_threadx_setup();
   UINT msg_size_in_words = sizeof(ui_message_t) / 4;
   if (sizeof(ui_message_t) % 4 != 0) msg_size_in_words++;

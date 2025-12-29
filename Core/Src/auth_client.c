@@ -12,7 +12,19 @@
 #include "protocol_5a_parse.h"
 #include "tx_api.h"
 #include "commands/inc/command0101.h"
-
+#include "commands/inc/command012c.h"
+#include "commands/inc/command0128.h"
+#include "commands/inc/command0107.h"
+#include "commands/inc/command0105.h"
+#include "commands/inc/command0102.h"
+#include "commands/inc/command0103.h"
+#include "commands/inc/command0137.h"
+#include "commands/inc/command1a05.h"
+#include "commands/inc/command0131.h"
+#include "commands/inc/command0130.h"
+#include "commands/inc/command013f.h"
+#include "commands/inc/command013e.h"
+#include "commands/inc/command0135.h"
 
 #define LOG_INFO(fmt, ...)  printf("[INFO] AUTH " fmt "\n", ##__VA_ARGS__)
 #define LOG_WARN(fmt, ...)  printf("[WARN] AUTH " fmt "\n", ##__VA_ARGS__)
@@ -25,7 +37,21 @@
 #define MAX_TLV_BUFFER    (1024 * 8) // 限制最大TLV大小，防止内存耗尽
 
 static const ProtocolEntry_t g_protocol_table[] = {
-    {AUTH_STATE_WAIT_0101, 0x0101, Handle0101}
+    {AUTH_STATE_WAIT_0101, 0x0101, Handle0101},
+{AUTH_STATE_WAIT_0133, 0x0101, Handle0101},
+{AUTH_STATE_WAIT_012C, 0x012C, Handle012c},
+{AUTH_STATE_WAIT_0128, 0x0128, Handle0128},
+{AUTH_STATE_WAIT_0107, 0x0107, Handle0107},
+{AUTH_STATE_WAIT_0105, 0x0105, Handle0105},
+{AUTH_STATE_WAIT_0102, 0x0102, Handle0102},
+{AUTH_STATE_WAIT_0103, 0x0103, Handle0103},
+{AUTH_STATE_WAIT_0137, 0x0137, Handle0137},
+{AUTH_STATE_WAIT_1A05, 0x1A05, Handle1a05},
+{AUTH_STATE_WAIT_0131, 0x0131, Handle0131},
+{AUTH_STATE_WAIT_0130, 0x0130, Handle0130},
+{AUTH_STATE_WAIT_013F, 0x013f, Handle013f},
+{AUTH_STATE_WAIT_013E, 0x013e, Handle013e},
+{AUTH_STATE_WAIT_0135, 0x0135, Handle0135},
 };
 
 #define TABLE_SIZE (sizeof(g_protocol_table) / sizeof(ProtocolEntry_t))
@@ -36,8 +62,9 @@ static AuthContext_t *g_active_ctx = NULL;
 static TX_QUEUE tx_queue;
 static uint8_t queue_buf[1024];
 
+static char g_uuid[33] = "7410142703F4FDF544C6EE8A7DD3AC29";
 
-static void send_tlv_and_backup(AuthContext_t* ctx, const uint8_t* data, uint16_t len);
+void send_tlv_and_backup(AuthContext_t* ctx, const uint8_t* data, uint16_t len);
 static void cleanup_queue_messages(AuthContext_t* ctx);
 
 void resend_last_packet(AuthContext_t* ctx);
@@ -55,6 +82,7 @@ AuthContext_t * AuthContext_Create(char* mac, int timeout_ms, int retryTimes) {
     ctx->retry_times = retryTimes;
     ctx->mtu = 20;
     ctx->mfs = 20;
+    strcpy(ctx->uuid, g_uuid);
     if (mac) {
         strncpy(ctx->mac, mac, sizeof(ctx->mac) - 1);
     }
@@ -339,7 +367,7 @@ void send_tlv(uint8_t* data, uint16_t len) {
     }
 }
 
-static void send_tlv_and_backup(AuthContext_t* ctx, const uint8_t* data, uint16_t len) {
+void send_tlv_and_backup(AuthContext_t* ctx, const uint8_t* data, uint16_t len) {
     if (len > MAX_RETRY_BUFFER) {
         LOG_ERR("Packet too large to backup (%d)", len);
         return;
