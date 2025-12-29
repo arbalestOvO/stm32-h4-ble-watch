@@ -7,9 +7,14 @@
 
 // 公用 CRC16 算法
 static uint16_t crc16_update(uint16_t crc, uint8_t data) {
-    data ^= (uint8_t)(crc & 0xFF);
-    data ^= data << 4;
-    return ((((uint16_t)data << 8) | ((crc >> 8) & 0xFF)) ^ (uint8_t)(data >> 4) ^ ((uint16_t)data << 3));
+    data ^= (uint8_t)(crc >> 8);
+
+    data ^= data >> 4;
+
+    return (crc << 8) ^
+           ((uint16_t)data << 12) ^
+           ((uint16_t)data << 5) ^
+           (uint16_t)data;
 }
 
 // =============================================================================
@@ -26,7 +31,7 @@ static void parser_input_byte(proto_parser_t *parser, uint8_t byte, frame_recv_c
         case STATE_WAIT_SOF:
             if (byte == PROTO_SOF) {
                 parser->state = STATE_WAIT_LEN_LOW;
-                parser->calculated_crc = 0xFFFF;
+                parser->calculated_crc = 0x0000;
                 parser->calculated_crc = crc16_update(parser->calculated_crc, byte);
             }
             break;
@@ -38,7 +43,7 @@ static void parser_input_byte(proto_parser_t *parser, uint8_t byte, frame_recv_c
             break;
 
         case STATE_WAIT_LEN_HIGH:
-            parser->expected_len |= ((uint16_t)byte << 8);
+            parser->expected_len = (((uint16_t)parser->expected_len) << 8) | byte;
             parser->calculated_crc = crc16_update(parser->calculated_crc, byte);
 
             // 长度校验：如果宣称的长度超过了我们接收缓存的能力，则视为非法帧重置
@@ -99,7 +104,7 @@ static void parser_input_byte(proto_parser_t *parser, uint8_t byte, frame_recv_c
             break;
 
         case STATE_WAIT_CRC_HIGH:
-            parser->received_crc |= ((uint16_t)byte << 8);
+            parser->received_crc =  (((uint16_t)parser->received_crc) << 8) | (uint16_t)byte;
 
             if (parser->calculated_crc == parser->received_crc) {
                 if (callback) {
@@ -134,7 +139,7 @@ static void build_single_frame(uint8_t control, uint8_t fsn, const uint8_t *data
     // 假设最大帧不超过 2KB，这里在栈上分配 buffer。
     // 如果嵌入式栈空间很小(如 ThreadX 线程栈 < 1K)，建议改为传入外部 buffer 或使用 static buffer
     uint16_t idx = 0;
-    uint16_t crc = 0xFFFF;
+    uint16_t crc = 0x0000;
 
     // 1. SOF
     frame_buf[idx++] = PROTO_SOF;
@@ -148,10 +153,10 @@ static void build_single_frame(uint8_t control, uint8_t fsn, const uint8_t *data
         length_val += 1; // FSN
     }
 
-    frame_buf[idx++] = length_val & 0xFF;
+    frame_buf[idx++] = (length_val >> 8) & 0xFF;
     crc = crc16_update(crc, frame_buf[idx-1]);
 
-    frame_buf[idx++] = (length_val >> 8) & 0xFF;
+    frame_buf[idx++] = length_val & 0xFF;
     crc = crc16_update(crc, frame_buf[idx-1]);
 
     // 3. Control
@@ -171,8 +176,8 @@ static void build_single_frame(uint8_t control, uint8_t fsn, const uint8_t *data
     }
 
     // 6. CRC
-    frame_buf[idx++] = crc & 0xFF;
     frame_buf[idx++] = (crc >> 8) & 0xFF;
+    frame_buf[idx++] = crc & 0xFF;
 
     // 发送
     if (send_cb) {

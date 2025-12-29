@@ -5,6 +5,9 @@
 #include "app_log.h"
 
 #include "app_log.h"
+
+#include <stdio.h>
+
 #include "main.h"
 #include "usart.h"
 #include "tx_api.h"
@@ -83,6 +86,76 @@ static uint8_t App_Log_Process(void)
         return 1; // 忙碌
     }
     return 0; // 空闲
+}
+
+void print_current_thread_stack_info(void)
+{
+    TX_THREAD *current_thread;
+    CHAR *name;
+    UINT state;
+    ULONG run_count;
+    UINT priority;
+    UINT preemption_threshold;
+    ULONG time_slice;
+    TX_THREAD *next_thread;
+    TX_THREAD *suspended_thread;
+
+    // 1. 获取当前线程指针
+    current_thread = tx_thread_identify();
+
+    if (current_thread == NULL) {
+        printf("Current context is ISR or Initialization, not a thread.\r\n");
+        return;
+    }
+
+    // 2. 获取线程基础信息
+    // 注意：stack_start 是栈底（低地址），stack_end 是栈顶（高地址，增长方向通常向下）
+    // stack_ptr 是当前的栈指针位置
+    void *stack_start;
+    void *stack_end;
+    void *stack_ptr; // 当前栈指针
+
+    tx_thread_info_get(current_thread, &name, &state, &run_count, &priority,
+                       &preemption_threshold, &time_slice, &next_thread,
+                       &suspended_thread);
+
+    // 直接访问 TCB 结构体获取栈边界（这也是官方API内部的做法）
+    // 注意：直接访问结构体成员比调API更直接，但依赖版本兼容性
+    stack_start = current_thread -> tx_thread_stack_start;
+    stack_end   = current_thread -> tx_thread_stack_end;
+    stack_ptr   = current_thread -> tx_thread_stack_ptr;
+
+    // 3. 计算大小
+    ULONG total_size = (ULONG)((CHAR*)stack_end - (CHAR*)stack_start + 1);
+    ULONG current_free = (ULONG)((CHAR*)stack_ptr - (CHAR*)stack_start);
+
+    printf("--- Thread: %s ---\r\n", name);
+    printf("Total Stack Size: %lu bytes\r\n", total_size);
+    printf("Current Free:     %lu bytes\r\n", current_free);
+
+    // 4. 计算历史最小剩余 (需要 TX_ENABLE_STACK_CHECKING)
+#ifdef TX_ENABLE_STACK_CHECKING
+    // 检测栈中是否还有 0xEF 模式来确定从未被接触过的内存
+    // 注意：tx_thread_stack_analyze 不是所有标准分发包都有，如果没有，可以使用下面的逻辑
+
+    ULONG *check_ptr = (ULONG *)stack_start;
+    while (check_ptr < (ULONG *)stack_end) {
+        if (*check_ptr != 0xEFEFEFEFUL) {
+            break;
+        }
+        check_ptr++;
+    }
+
+    ULONG min_ever_free = (ULONG)((CHAR*)check_ptr - (CHAR*)stack_start);
+    printf("Min Ever Free:    %lu bytes (High Water Mark)\r\n", min_ever_free);
+
+    if (min_ever_free < 100) {
+         printf("WARNING: Stack nearly overflowed!\r\n");
+    }
+#else
+    printf("Min Ever Free:    Unknown (Enable TX_ENABLE_STACK_CHECKING)\r\n");
+#endif
+    printf("------------------------\r\n");
 }
 
 /**

@@ -10,9 +10,36 @@
 #include <stdint.h>
 #include <stdbool.h>
 
+#include "host/ble_uuid.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+#define MAX_DISC_SERVICES     20   // 最大支持缓存的服务数量
+#define MAX_DISC_CHRS_PER_SVC 15   // 每个服务下最大支持缓存的特征数量
+
+// --- 数据结构定义 ---
+
+// 1. 特征信息结构体
+typedef struct {
+    ble_uuid_any_t uuid;
+    uint16_t def_handle;
+    uint16_t val_handle;
+    uint8_t properties;
+} app_ble_chr_t;
+
+// 2. 服务信息结构体（包含特征数组）
+typedef struct {
+    ble_uuid_any_t uuid;
+    uint16_t start_handle;
+    uint16_t end_handle;
+
+    // 该服务下的特征列表
+    app_ble_chr_t chars[MAX_DISC_CHRS_PER_SVC];
+    int chr_count;
+} app_ble_svc_t;
+
 
 /* -------------------------------------------------------------------------- */
 /* 回调定义 (对应 BluetoothGattCallback / ScanCallback)                       */
@@ -41,7 +68,10 @@ typedef struct {
      * @param conn_handle 连接句柄
      * @param status 操作状态
      */
-    void (*on_services_discovered)(uint16_t conn_handle, int status);
+    void (*on_services_discovered)(uint16_t conn_handle,
+                                            int status,
+                                            const app_ble_svc_t *services,
+                                            int svc_count);
 
     /**
      * 对应 onCharacteristicRead

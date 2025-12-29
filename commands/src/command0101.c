@@ -54,5 +54,6 @@ int Handle0101(AuthContext_t* ctx, uint8_t* data, int len)
     } else {
         printf("[0101 WARN] not found 0x0C\n");
     }
+    printf("update 0101 ok\n");
     return 0;
 }

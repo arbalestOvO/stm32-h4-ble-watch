@@ -25,6 +25,7 @@
 /* USER CODE BEGIN Includes */
 #include <stdio.h>
 #include "stm32h7xx_hal.h"
+#include "ui_message_handler.h"
 #include "build/Release/_deps/lvgl-src/src/misc/lv_timer.h"
 #include "ui_protocol_type.h"
 /* USER CODE END Includes */
@@ -46,13 +47,20 @@
 
 /* Private variables ---------------------------------------------------------*/
 TX_THREAD tx_app_thread;
+TX_QUEUE g_ui_queue;
+uint8_t g_ui_queue_buffer[UI_QUEUE_SIZE * sizeof(ui_message_t)];
 /* USER CODE BEGIN PV */
+TX_MUTEX lvgl_mutex;
 
+void gui_init_threadx_setup() {
+  tx_mutex_create(&lvgl_mutex, "LVGL Mutex", TX_NO_INHERIT);
+}
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
 void await_and_handle_queue(void);
+TX_THREAD * g_gui_thread_ptr;
 /* USER CODE END PFP */
 /**
   * @brief  Application ThreadX Initialization.
@@ -83,6 +91,7 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
   }
 
   /* USER CODE BEGIN App_ThreadX_Init */
+  gui_init_threadx_setup();
   UINT msg_size_in_words = sizeof(ui_message_t) / 4;
   if (sizeof(ui_message_t) % 4 != 0) msg_size_in_words++;
 
@@ -100,8 +109,11 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
 void tx_app_thread_entry(ULONG thread_input)
 {
   /* USER CODE BEGIN tx_app_thread_entry */
+  g_gui_thread_ptr = tx_thread_identify();
   while (1) {
+    tx_mutex_get(&lvgl_mutex, TX_WAIT_FOREVER);
     lv_timer_handler(); // 处理UI绘制任务
+    tx_mutex_put(&lvgl_mutex);
     await_and_handle_queue();
     tx_thread_sleep(3);       // 必须有短暂延时，给系统喘息
   }
@@ -134,7 +146,7 @@ void await_and_handle_queue(void) {
     // --- 分发器逻辑 ---
     switch (recv_msg.type) {
       case UI_EVENT_BLE_FOUND:
-
+        UI_AddBleItem(recv_msg.payload.ble.name, recv_msg.payload.ble.mac);
         break;
       default:
         // 未知消息类型

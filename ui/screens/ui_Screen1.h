@@ -15,8 +15,6 @@ extern void ui_Screen1_screen_init(void);
 extern void ui_Screen1_screen_destroy(void);
 extern lv_obj_t * ui_Screen1;
 extern lv_obj_t * ui_Panel1;
-extern lv_obj_t * ui_CompDeviceItem;
-extern void ui_event_CompDeviceItem_Button5(lv_event_t * e);
 extern void ui_event_Button1(lv_event_t * e);
 extern lv_obj_t * ui_Button1;
 extern lv_obj_t * ui_Label2;

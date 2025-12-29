@@ -7,6 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "ble_client.h"
+#include "protocol_5a_parse.h"
 #include "tx_api.h"
 #include "commands/inc/command0101.h"
 
@@ -15,72 +18,276 @@
 #define LOG_WARN(fmt, ...)  printf("[WARN] AUTH " fmt "\n", ##__VA_ARGS__)
 #define LOG_ERR(fmt, ...)   printf("[ERROR] AUTH " fmt "\n", ##__VA_ARGS__)
 
-static TX_QUEUE tx_queue;
-static uint8_t queue_buf[1024];
+
+#define QUEUE_SIZE_BYTES    2048
+#define MSG_QUEUE_SIZE      10  // 队列深度，消息个数
+#define MAX_RETRY_BUFFER    (1024 * 8) // 限制最大备份包大小，防止内存耗尽
+#define MAX_TLV_BUFFER    (1024 * 8) // 限制最大TLV大小，防止内存耗尽
 
 static const ProtocolEntry_t g_protocol_table[] = {
     {AUTH_STATE_WAIT_0101, 0x0101, Handle0101}
 };
+
 #define TABLE_SIZE (sizeof(g_protocol_table) / sizeof(ProtocolEntry_t))
 
-int send_tlv(uint8_t* data, int len);
-void send_tlv_and_backup(AuthContext_t* ctx, uint8_t* data, int len);
+// 全局指针，用于连接 BLE 回调和当前上下文 (单例模式妥协)
+static AuthContext_t *g_active_ctx = NULL;
 
-void resend_last_packet(AuthContext_t* ctx) {
-    if (ctx->last_len > 0) {
-        LOG_WARN("Resending last packet (len=%d)...", ctx->last_len);
-        send_tlv(ctx->last_buf, ctx->last_len);
-    }
-}
+static TX_QUEUE tx_queue;
+static uint8_t queue_buf[1024];
+
+
+static void send_tlv_and_backup(AuthContext_t* ctx, const uint8_t* data, uint16_t len);
+static void cleanup_queue_messages(AuthContext_t* ctx);
+
+void resend_last_packet(AuthContext_t* ctx);
 
 AuthContext_t * AuthContext_Create(char* mac, int timeout_ms, int retryTimes) {
-    AuthContext_t* authContext = (AuthContext_t*)malloc(sizeof(AuthContext_t));
-    authContext->current_retry_times = retryTimes;
-    authContext->timeout_ms = timeout_ms;
-    authContext->retry_times = retryTimes;
-    *(char**)(&(authContext->mac)) = mac;
-    if (tx_queue_create(&tx_queue, "spi to auth thread", 1, queue_buf, 1024) != TX_SUCCESS) {
-        LOG_ERR("Failed to create TX queue");
-        free(authContext);
+    AuthContext_t* ctx = (AuthContext_t*)malloc(sizeof(AuthContext_t));
+    if (!ctx) {
+        LOG_ERR("Malloc context failed");
         return NULL;
     }
-    return authContext;
+    memset(ctx, 0, sizeof(AuthContext_t));
+
+    ctx->current_retry_times = retryTimes;
+    ctx->timeout_ms = timeout_ms;
+    ctx->retry_times = retryTimes;
+    ctx->mtu = 20;
+    ctx->mfs = 20;
+    if (mac) {
+        strncpy(ctx->mac, mac, sizeof(ctx->mac) - 1);
+    }
+    ctx->queue_mem = malloc(QUEUE_SIZE_BYTES);
+    if (!ctx->queue_mem) {
+        LOG_ERR("Malloc queue memory failed");
+        free(ctx);
+        return NULL;
+    }
+    UINT status = tx_queue_create(&ctx->tx_queue, "auth_queue",
+                                  sizeof(MsgEvent_t) / sizeof(ULONG),
+                                  ctx->queue_mem, QUEUE_SIZE_BYTES);
+
+    if (status != TX_SUCCESS) {
+        LOG_ERR("Create queue failed: %d", status);
+        free(ctx->queue_mem);
+        free(ctx);
+        return NULL;
+    }
+    ctx->last_buf = NULL;
+    ctx->last_len = 0;
+    return ctx;
 }
+
+void AuthContext_Free(AuthContext_t *context) {
+    if (!context) return;
+    if (g_active_ctx == context) {
+        g_active_ctx = NULL;
+    }
+    cleanup_queue_messages(context);
+    tx_queue_delete(&context->tx_queue);
+    if (context->queue_mem) free(context->queue_mem);
+    if (context->last_buf) free(context->last_buf);
+    free(context);
+}
+
+static void clear_assembly_buffer(AuthContext_t* ctx) {
+    if (ctx->temp_asm_buf) {
+        free(ctx->temp_asm_buf);
+        ctx->temp_asm_buf = NULL;
+    }
+    ctx->temp_asm_len = 0;
+    ctx->next_fsn = 0;
+}
+
+void on_received_frame(uint8_t control, uint8_t fsn, uint8_t *data, uint16_t len) {
+    if (g_active_ctx == NULL) return;
+    AuthContext_t* ctx = g_active_ctx;
+
+    // ---------------------------------------------------------
+    // Case 0: 不分帧 (Unfragmented)
+    // ---------------------------------------------------------
+    if (control == 0) {
+        // 如果之前有烂尾的组包任务，直接丢弃，避免内存泄露或状态错乱
+        if (ctx->temp_asm_buf != NULL) {
+            printf("[WARN] Dropping incomplete packet due to Control 0\n");
+            clear_assembly_buffer(ctx);
+        }
+        // 直接透传处理，不分配额外堆内存
+        on_tlv_received(data, len);
+        return;
+    }
+
+    // ---------------------------------------------------------
+    // Case 1: 起始帧 (Start)
+    // ---------------------------------------------------------
+    if (control == 1) {
+        // 收到 Start，意味着必须开始新任务，先清理旧的（如果有）
+        clear_assembly_buffer(ctx);
+
+        if (len == 0) return; // 只有头没有体的情况防御
+
+        ctx->temp_asm_buf = (uint8_t*)malloc(len);
+        if (!ctx->temp_asm_buf) {
+            printf("[ERR] OOM: Start frame\n");
+            return;
+        }
+
+        memcpy(ctx->temp_asm_buf, data, len);
+        ctx->temp_asm_len = len;
+        ctx->next_fsn = (fsn + 1) & 0xFF; // 记录期望的下一帧
+        return;
+    }
+
+    // ---------------------------------------------------------
+    // Case 2 & 3: 中间帧 (Middle) / 末尾帧 (End)
+    // ---------------------------------------------------------
+    if (control == 2 || control == 3) {
+        // 1. 校验前置状态：如果没有 Buffer，说明没收到 Start，丢弃
+        if (ctx->temp_asm_buf == NULL) {
+            printf("[WARN] Dropping orphan frame (ctrl=%d, fsn=%d)\n", control, fsn);
+            return;
+        }
+
+        // 2. 校验序号：如果不连续，说明丢包了，整个包作废
+        if (fsn != ctx->next_fsn) {
+            printf("[ERR] FSN mismatch: exp %d, got %d. Resetting.\n", ctx->next_fsn, fsn);
+            clear_assembly_buffer(ctx);
+            return;
+        }
+
+        // 3. 扩容 (Realloc)
+        uint32_t new_total_len = ctx->temp_asm_len + len;
+        uint8_t* new_ptr = (uint8_t*)realloc(ctx->temp_asm_buf, new_total_len);
+
+        if (!new_ptr) {
+            printf("[ERR] OOM: Realloc failed\n");
+            clear_assembly_buffer(ctx); // realloc 失败不会释放原内存，需手动释放
+            return;
+        }
+
+        ctx->temp_asm_buf = new_ptr; // 更新指针 (realloc 可能移动地址)
+
+        // 4. 追加数据
+        if (len > 0) {
+            memcpy(ctx->temp_asm_buf + ctx->temp_asm_len, data, len);
+            ctx->temp_asm_len += len;
+        }
+
+        ctx->next_fsn = (fsn + 1) & 0xFF; // 更新期望序号
+
+        // 5. 如果是末尾帧，提交并销毁
+        if (control == 3) {
+            // ---> 关键点：调用回调处理完整包 <---
+            on_tlv_received(ctx->temp_asm_buf, ctx->temp_asm_len);
+
+            // ---> 处理完立即释放内存，不留在 ctx 中 <---
+            clear_assembly_buffer(ctx);
+        }
+    }
+}
+
+/**
+ * @brief 清理队列残留消息
+ */
+static void cleanup_queue_messages(AuthContext_t* ctx) {
+    MsgEvent_t msg;
+    while (tx_queue_receive(&ctx->tx_queue, &msg, TX_NO_WAIT) == TX_SUCCESS) {
+        if (msg.payload) {
+            free(msg.payload);
+        }
+    }
+}
+
+void on_tlv_received(uint8_t* data, int len) {
+    if (data == NULL || len < 2) return;
+    if (g_active_ctx == NULL) {
+        // LOG_WARN("No active auth context, dropping packet");
+        return;
+    }
+
+    // 解析 ID
+    uint16_t id = ((uint16_t)data[0] << 8) | data[1];
+
+    // 拷贝 Payload
+    uint8_t* payload_copy = NULL;
+    uint16_t payload_len = len - 2;
+
+    if (payload_len > 0) {
+        payload_copy = (uint8_t*)malloc(payload_len);
+        if (!payload_copy) {
+            LOG_ERR("OOM handling 0x%04X", id);
+            return;
+        }
+        memcpy(payload_copy, &data[2], payload_len);
+    }
+
+    MsgEvent_t msg;
+    msg.id = id;
+    msg.len = payload_len;
+    msg.payload = payload_copy; // 传递指针所有权
+
+    // 发送到队列
+    UINT status = tx_queue_send(&g_active_ctx->tx_queue, &msg, TX_NO_WAIT);
+    if (status != TX_SUCCESS) {
+        LOG_ERR("Queue full, drop 0x%04X", id);
+        if (payload_copy) free(payload_copy); // 发送失败需释放，否则泄露
+    } else {
+        LOG_INFO("Recv ID: 0x%04X, Pushed to queue", id);
+    }
+}
+
+
 
 AuthResult_t auth(AuthContext_t *context) {
     if (!context) return AUTH_STATUS_ERROR;
-    LOG_INFO("auth start");
+    g_active_ctx = context;
+    LOG_INFO("Auth start for MAC: %s", context->mac);
     MsgEvent_t msg;
-    uint8_t link_tlv[] = {0x01, 0x01, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00};
+    static const uint8_t link_tlv[] = {0x01, 0x01, 0x01, 0x00, 0x02, 0x00, 0x03, 0x00, 0x04, 0x00};
     context->state = AUTH_STATE_WAIT_0101;
     send_tlv_and_backup(context, link_tlv, sizeof(link_tlv));
+    AuthResult_t result = AUTH_STATUS_ERROR;
     while (1) {
+        // 状态检查
         if (context->state == AUTH_STATE_AUTHENTICATED) {
-            return AUTH_STATUS_OK;
+            result = AUTH_STATUS_OK;
+            break;
         }
         if (context->state == AUTH_STATE_FAILED) {
-            return AUTH_STATUS_ERROR;
+            result = AUTH_STATUS_ERROR;
+            break;
         }
-        int status = tx_queue_receive(&tx_queue, &msg, context->timeout_ms);
+
+        // 接收消息
+        UINT status = tx_queue_receive(&context->tx_queue, &msg, context->timeout_ms);
+
         if (status == TX_SUCCESS) {
-            uint8_t found = 0;
+            uint8_t handled = 0;
+            // 遍历协议表
             for (int i = 0; i < TABLE_SIZE; i++) {
                 if (g_protocol_table[i].cmd_id == msg.id) {
                     if (context->state == g_protocol_table[i].required_state) {
                         LOG_INFO("Handling ID 0x%04X...", msg.id);
-
-                        // 执行处理，如果处理成功，状态机会流转，且在该函数内
-                        // 会调用 send_tlv_and_backup 重置 retry 计数器
+                        // Handler 内部负责状态流转
                         g_protocol_table[i].handler(context, msg.payload, msg.len);
-                        found = 1;
+                        handled = 1;
                         break;
+                    } else {
+                        LOG_WARN("ID 0x%04X received but state mismatch (curr: %d, req: %d)",
+                                 msg.id, context->state, g_protocol_table[i].required_state);
                     }
                 }
             }
-            if (!found) LOG_INFO("Ignored ID: 0x%04X", msg.id);
+            if (!handled) {
+                LOG_INFO("Ignored unknown ID: 0x%04X", msg.id);
+            }
+            // 务必释放接收到的 payload
             if (msg.payload) free(msg.payload);
-        } else if (status == TX_QUEUE_EMPTY) {
-            LOG_WARN("Timeout waiting for response in state %d", context->state);
+
+        } else if (status == TX_QUEUE_EMPTY) { // ThreadX 超时返回 TX_QUEUE_EMPTY (需确认头文件定义，通常非0)
+
+            LOG_WARN("Timeout waiting response in state %d", context->state);
 
             if (context->current_retry_times > 0) {
                 context->current_retry_times--;
@@ -89,63 +296,82 @@ AuthResult_t auth(AuthContext_t *context) {
             } else {
                 LOG_ERR("Max retries exhausted. Auth Failed.");
                 context->state = AUTH_STATE_FAILED;
-                return AUTH_STATUS_ERROR;
+                result = AUTH_STATUS_ERROR;
+                break;
             }
-            continue;
         } else {
-            LOG_ERR("Failed to receive");
-            return AUTH_STATUS_ERROR;
+            LOG_ERR("Queue receive error: %d", status);
+            result = AUTH_STATUS_ERROR;
+            break;
         }
     }
-    return AUTH_STATUS_OK;
+    // 鉴权结束，清除激活状态
+    g_active_ctx = NULL;
+    // 清理可能残留的消息
+    cleanup_queue_messages(context);
+
+    return result;
 }
 
-void AuthContext_Free(AuthContext_t *context) {
-    free(context);
-    context = NULL;
-    tx_queue_delete(&tx_queue);
-}
+void send_tlv(uint8_t* data, uint16_t len) {
+    if (!g_active_ctx) return;
 
-void on_tlv_received(uint8_t* data, int len) {
-    if (data == NULL || len < 2) return;
+    uint16_t current_mtu = g_active_ctx->mtu;
+    if (current_mtu == 0) current_mtu = 20; // 保护
 
-    uint16_t id = (uint8_t)data[0] << 8 | (uint8_t)data[1];
-    uint8_t* payload_copy = (uint8_t*)malloc(len - 2);
-    if (payload_copy && len > 2) {
-        memcpy(payload_copy, &data[2], len - 2);
+    int current_idx = 0;
+    const uint8_t* p_data = data;
+
+    // 简单的分包逻辑
+    while (current_idx < len) {
+        uint16_t packet_len = (len - current_idx > current_mtu) ? current_mtu : (len - current_idx);
+
+        // 注意：0x1B Handle 最好也是传入参数或存在 ctx 中
+        android_ble_write_char(0x1B, p_data, packet_len, 1);
+
+        current_idx += packet_len;
+        p_data += packet_len;
+
+        // 仅在分包时延时，或根据 BLE 栈的流控移除此延时
+        if (current_idx < len) {
+            tx_thread_sleep(10); // 减小延时，30ms 太长
+        }
     }
-
-    MsgEvent_t msg;
-    msg.id = id;
-    msg.len = len - 2;
-    msg.payload = payload_copy;
-
-    // tx_queue_send(&g_auth_ctx.msg_queue, &msg, TX_NO_WAIT);
-    LOG_INFO("Pushing Msg ID: 0x%04X to queue", id);
 }
 
-
-int send_tlv(uint8_t* data, int len) {
-    printf("[NETWORK] Sending %d bytes: ID 0x%02X%02X\n", len, data[0], data[1]);
-    return 0;
-}
-
-uint8_t cp_buf[8 * 1024];
-
-void send_tlv_and_backup(AuthContext_t* ctx, uint8_t* data, int len) {
-    if (len > sizeof(cp_buf)) {
-        LOG_ERR("Packet too large to backup!");
+static void send_tlv_and_backup(AuthContext_t* ctx, const uint8_t* data, uint16_t len) {
+    if (len > MAX_RETRY_BUFFER) {
+        LOG_ERR("Packet too large to backup (%d)", len);
         return;
     }
-
-    // 1. 备份数据，用于重试
-    memcpy(cp_buf, data, len);
-    ctx->last_len = len;
-    ctx->last_buf = *(uint8_t**)&cp_buf;
-
-    // 2. 复位重试计数器 (每次发送新指令时重置)
+    if (ctx->last_buf) {
+        free(ctx->last_buf);
+        ctx->last_buf = NULL;
+    }
+    ctx->last_buf = (uint8_t*)malloc(len);
+    if (ctx->last_buf) {
+        memcpy(ctx->last_buf, data, len);
+        ctx->last_len = len;
+    } else {
+        LOG_ERR("Backup malloc failed");
+        ctx->last_len = 0;
+    }
     ctx->current_retry_times = ctx->retry_times;
 
+    printf("[BLUETOOTH] Sending %d bytes: ID 0x%02X%02X\n", len, data[0], data[1]);
+    printf("[SEND TLV]: ");
+    for (int i = 0; i < len; i++) {
+        printf("%02X", data[i]);
+    }
+    printf("\n");
     // 3. 真正发送
-    send_tlv(data, len);
+    parser_send_packet(data, len, ctx->mfs, send_tlv);
+}
+
+void resend_last_packet(AuthContext_t* ctx)
+{
+    if (ctx->last_len > 0 && ctx->last_buf != NULL) {
+        LOG_WARN("Resending last packet (len=%d)...", ctx->last_len);
+        parser_send_packet(ctx->last_buf, ctx->last_len, ctx->mfs, send_tlv);
+    }
 }

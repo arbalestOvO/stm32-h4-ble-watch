@@ -10,7 +10,6 @@
 extern "C" {
 #endif
 
-void ConnectClicked(lv_event_t * e);
 void ScanClicked(lv_event_t * e);
 
 #ifdef __cplusplus

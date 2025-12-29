@@ -270,6 +270,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/Core/Src/printf_redirect.c
     ${CMAKE_SOURCE_DIR}/Core/Src/app_client.c
     ${CMAKE_SOURCE_DIR}/Core/Src/ui_message_handler.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/ui_interface.c
 )
 
 # Add include paths

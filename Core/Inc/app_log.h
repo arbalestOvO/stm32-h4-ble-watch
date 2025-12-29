@@ -19,4 +19,6 @@ void Printf_Init(void);
  */
 void UART_Buffer_Write(uint8_t *data, uint16_t len);
 
+void print_current_thread_stack_info(void);
+
 #endif //ABOLUO_EXIT_APP_LOG_H

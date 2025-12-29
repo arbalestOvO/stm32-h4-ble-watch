@@ -6,6 +6,7 @@
 #define ABOLUO_EXIT_AUTH_CLIENT_H
 #include <stdint.h>
 
+#include "tx_api.h"
 
 
 typedef enum {
@@ -40,6 +41,13 @@ typedef struct {
 
     int timeout_ms;
     AuthState_t state;
+
+    TX_QUEUE tx_queue;
+    void* queue_mem;
+    uint8_t* temp_asm_buf;    // 临时拼凑用的 buffer
+    uint32_t temp_asm_len;    // 当前已拼凑长度
+    uint8_t  next_fsn;        // 下一个期望的序号
+
 
     char mac[16];
     uint8_t *last_buf;

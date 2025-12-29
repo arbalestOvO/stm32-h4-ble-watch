@@ -3,8 +3,11 @@
 // LVGL version: 9.2.2
 // Project name: Test1
 
+#include "ble_client.h"
 #include "ui.h"
 #include "stdio.h"
+
+extern uint8_t is_initialized;
 
 void ConnectClicked(lv_event_t * e)
 {
@@ -16,4 +19,10 @@ void ScanClicked(lv_event_t * e)
 {
 	printf("ScanClicked\n");
 	// Your code here
+	if (is_initialized) {
+		int rc = android_ble_start_scan();
+		printf("scan ret: %d\n", rc);
+	} else {
+		printf("Not initialized\n");
+	}
 }

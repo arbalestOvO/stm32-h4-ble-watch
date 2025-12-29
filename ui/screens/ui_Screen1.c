@@ -7,19 +7,9 @@
 
 lv_obj_t * ui_Screen1 = NULL;
 lv_obj_t * ui_Panel1 = NULL;
-lv_obj_t * ui_CompDeviceItem = NULL;
 lv_obj_t * ui_Button1 = NULL;
 lv_obj_t * ui_Label2 = NULL;
 // event funtions
-void ui_event_CompDeviceItem_Button5(lv_event_t * e)
-{
-    lv_event_code_t event_code = lv_event_get_code(e);
-
-    if(event_code == LV_EVENT_CLICKED) {
-        ConnectClicked(e);
-    }
-}
-
 void ui_event_Button1(lv_event_t * e)
 {
     lv_event_code_t event_code = lv_event_get_code(e);
@@ -48,10 +38,6 @@ void ui_Screen1_screen_init(void)
     lv_obj_set_style_bg_color(ui_Panel1, lv_color_hex(0xF8F8F8), LV_PART_MAIN | LV_STATE_DEFAULT);
     lv_obj_set_style_bg_opa(ui_Panel1, 255, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    ui_CompDeviceItem = ui_Comp_DeviceItem_create(ui_Panel1);
-    lv_obj_set_x(ui_CompDeviceItem, 0);
-    lv_obj_set_y(ui_CompDeviceItem, 0);
-
     ui_Button1 = lv_button_create(ui_Screen1);
     lv_obj_set_width(ui_Button1, 100);
     lv_obj_set_height(ui_Button1, 44);
@@ -68,8 +54,6 @@ void ui_Screen1_screen_init(void)
     lv_label_set_text(ui_Label2, "扫描");
     lv_obj_set_style_text_font(ui_Label2, &ui_font_Font1, LV_PART_MAIN | LV_STATE_DEFAULT);
 
-    lv_obj_add_event_cb(ui_comp_get_child(ui_CompDeviceItem, UI_COMP_COMP_DEVICEITEM_BUTTON5),
-                        ui_event_CompDeviceItem_Button5, LV_EVENT_ALL, NULL);
     lv_obj_add_event_cb(ui_Button1, ui_event_Button1, LV_EVENT_ALL, NULL);
 
 }
@@ -81,7 +65,6 @@ void ui_Screen1_screen_destroy(void)
     // NULL screen variables
     ui_Screen1 = NULL;
     ui_Panel1 = NULL;
-    ui_CompDeviceItem = NULL;
     ui_Button1 = NULL;
     ui_Label2 = NULL;
 

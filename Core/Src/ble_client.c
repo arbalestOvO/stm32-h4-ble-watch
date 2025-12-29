@@ -9,6 +9,8 @@
 #include <stdlib.h>
 
 /* NimBLE Stack Headers */
+#include "ble_hs_priv.h"
+#include "ui_interface.h"
 #include "host/ble_hs.h"
 #include "host/ble_uuid.h"
 #include "host/util/util.h"
@@ -32,6 +34,40 @@ static android_ble_context_t g_ble_ctx = {
     .connected = false,
     .cb = NULL
 };
+
+
+// 定义目标服务 UUID: 0xFE86
+static const ble_uuid16_t svc_uuid_fe86 = BLE_UUID16_INIT(0xFE86);
+
+// 前向声明回调
+static int on_fe86_chars_found(uint16_t conn_handle, const struct ble_gatt_error *error,
+                               const struct ble_gatt_chr *chr, void *arg);
+static int on_fe86_svc_found(uint16_t conn_handle, const struct ble_gatt_error *error,
+                             const struct ble_gatt_svc *service, void *arg);
+
+typedef void (*on_services_discovered_fn)(uint16_t conn_handle,
+                                          int status,
+                                          const app_ble_svc_t *services,
+                                          int svc_count);
+
+// 用于管理发现过程的上下文
+typedef struct {
+    // 用户提供的回调函数
+    on_services_discovered_fn user_cb;
+
+    // 暂存发现结果的缓冲区
+    app_ble_svc_t temp_svc;
+
+    // 标记是否真的找到了服务（用于处理 EDONE 但没数据的情况）
+    bool service_found;
+} disc_context_t;
+
+static disc_context_t g_fe86_ctx;
+
+// 清空上下文的辅助函数
+static void reset_ctx() {
+    memset(&g_fe86_ctx, 0, sizeof(g_fe86_ctx));
+}
 
 /* -------------------------------------------------------------------------- */
 /* 辅助函数                                                                   */
@@ -89,51 +125,125 @@ static int on_write_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
     return 0;
 }
 
-// 特征发现回调
-static int on_chr_disc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
-                          const struct ble_gatt_chr *chr, void *arg) {
+static int internal_on_chars_found(uint16_t conn_handle,
+                                   const struct ble_gatt_error *error,
+                                   const struct ble_gatt_chr *chr,
+                                   void *arg) {
+    // 1. 结束判断 (EDONE)
     if (error->status == BLE_HS_EDONE) {
-        // 单个服务的特征发现结束，我们这里简化逻辑，
-        // 假设所有服务的特征发现都完成后再触发 on_services_discovered
-        // 实际复杂的实现需要计数器或状态机
-        if (g_ble_ctx.cb && g_ble_ctx.cb->on_services_discovered) {
-            g_ble_ctx.cb->on_services_discovered(conn_handle, 0);
+        printf("✅ [GATT] 0xFE86 特征发现完毕，回调上层应用\n");
+
+        // 调用用户的回调接口！
+        if (g_fe86_ctx.user_cb) {
+            // 参数：conn_handle, status=0, 服务数组指针, 服务数量=1
+            g_fe86_ctx.user_cb(conn_handle, 0, &g_fe86_ctx.temp_svc, 1);
         }
+
+        // 任务完成，清理上下文（可选）
+        reset_ctx();
         return 0;
     }
 
+    // 2. 错误处理
     if (error->status != 0) {
-        printf("Error discovering characteristics: %d\n", error->status);
+        printf("❌ [GATT] 特征发现出错: %d\n", error->status);
+        if (g_fe86_ctx.user_cb) {
+            g_fe86_ctx.user_cb(conn_handle, error->status, NULL, 0);
+        }
+        reset_ctx();
         return 0;
     }
 
-    // 调试日志：打印发现的特征
-    // printf("Discovered Characteristic: UUID=");
-    // print_uuid(&chr->uuid.u);
-    // printf(", Handle=%d\n", chr->val_handle);
+    // 3. 填充数据到你的结构体
+    if (chr != NULL) {
+        app_ble_svc_t *svc = &g_fe86_ctx.temp_svc;
+
+        // 检查数组是否满了
+        if (svc->chr_count < MAX_DISC_CHRS_PER_SVC) {
+            app_ble_chr_t *my_chr = &svc->chars[svc->chr_count];
+
+            // 复制 Handle 和 属性
+            my_chr->def_handle = chr->def_handle;
+            my_chr->val_handle = chr->val_handle;
+            my_chr->properties = chr->properties;
+
+            // 复制 UUID (NimBLE 提供了专用复制函数)
+            ble_uuid_copy((ble_uuid_any_t *)&my_chr->uuid, (const ble_uuid_t *)&chr->uuid);
+
+            svc->chr_count++;
+
+            // [调试打印]
+            char buf[BLE_UUID_STR_LEN];
+            ble_uuid_to_str((const ble_uuid_t *)&chr->uuid, buf);
+            printf("   -> 存入特征: %s (Handle 0x%04X)\n", buf, chr->val_handle);
+        } else {
+            printf("⚠️ 警告: 特征数量超过 MAX_DISC_CHRS_PER_SVC，忽略剩余特征\n");
+        }
+    }
 
     return 0;
 }
 
-// 服务发现回调
-static int on_svc_disc_cb(uint16_t conn_handle, const struct ble_gatt_error *error,
-                          const struct ble_gatt_svc *service, void *arg) {
-    if (error->status == BLE_HS_EDONE) {
-        return 0;
-    }
 
+static int internal_on_svc_found(uint16_t conn_handle,
+                                 const struct ble_gatt_error *error,
+                                 const struct ble_gatt_svc *service,
+                                 void *arg) {
+    // 1. 错误处理
     if (error->status != 0) {
-        printf("Error discovering services: %d\n", error->status);
+        // 如果是 EDONE 且没找到服务
+        if (error->status == BLE_HS_EDONE) {
+            if (!g_fe86_ctx.service_found) {
+                printf("❌ [GATT] 未找到 0xFE86 服务\n");
+                if (g_fe86_ctx.user_cb) {
+                    // status 非 0 表示失败
+                    g_fe86_ctx.user_cb(conn_handle, BLE_HS_ENOENT, NULL, 0);
+                }
+                reset_ctx();
+            }
+            return 0;
+        }
+
+        // 其他错误
+        printf("❌ [GATT] 服务发现出错: %d\n", error->status);
+        if (g_fe86_ctx.user_cb) {
+            g_fe86_ctx.user_cb(conn_handle, error->status, NULL, 0);
+        }
+        reset_ctx();
         return 0;
     }
 
-    // printf("Discovered Service: UUID=");
-    // print_uuid(&service->uuid.u);
-    // printf("\n");
+    // 2. 找到了服务
+    if (service != NULL) {
+        printf("✅ [GATT] 找到 0xFE86 (Handle %d ~ %d)，开始搜索特征...\n",
+               service->start_handle, service->end_handle);
 
-    // 发现服务后，立即递归发现该服务下的特征
-    ble_gattc_disc_all_chrs(conn_handle, service->start_handle, service->end_handle,
-                            on_chr_disc_cb, NULL);
+        g_fe86_ctx.service_found = true;
+
+        // 填充服务的基本信息
+        g_fe86_ctx.temp_svc.start_handle = service->start_handle;
+        g_fe86_ctx.temp_svc.end_handle = service->end_handle;
+        g_fe86_ctx.temp_svc.chr_count = 0; // 清零特征计数
+        ble_uuid_copy((ble_uuid_any_t *)&g_fe86_ctx.temp_svc.uuid, (const ble_uuid_t *)&service->uuid);
+
+        // 3. 【关键】立即发起特征发现
+        // 注意：这里只搜这个服务范围内的特征，效率极高
+        int rc = ble_gattc_disc_all_chrs(
+            conn_handle,
+            service->start_handle,
+            service->end_handle,
+            internal_on_chars_found, // 下一步的回调
+            NULL
+        );
+
+        if (rc != 0) {
+            printf("❌ 发起特征搜索失败: %d\n", rc);
+            if (g_fe86_ctx.user_cb) {
+                g_fe86_ctx.user_cb(conn_handle, rc, NULL, 0);
+            }
+            reset_ctx();
+        }
+    }
 
     return 0;
 }
@@ -141,8 +251,8 @@ static int on_svc_disc_cb(uint16_t conn_handle, const struct ble_gatt_error *err
 /* -------------------------------------------------------------------------- */
 /* GAP 事件处理 (连接、扫描、通知)                                             */
 /* -------------------------------------------------------------------------- */
-
 static int ble_gap_event(struct ble_gap_event *event, void *arg) {
+    printf("event %d\n", event->type);
     switch (event->type) {
         case BLE_GAP_EVENT_CONNECT:
             if (event->connect.status == 0) {
@@ -164,6 +274,7 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
             if (g_ble_ctx.cb && g_ble_ctx.cb->on_connection_state_change) {
                 g_ble_ctx.cb->on_connection_state_change(event->disconnect.conn.conn_handle, 0, 0); // 0 = Disconnected
             }
+            ui_show_notify_safe(false, false, "设备已断连");
             break;
 
         case BLE_GAP_EVENT_DISC:
@@ -174,7 +285,9 @@ static int ble_gap_event(struct ble_gap_event *event, void *arg) {
                                              (const uint8_t *)event->disc.data, event->disc.length_data);
             }
             break;
-
+        case BLE_GAP_EVENT_DISC_COMPLETE:
+            ui_show_notify_safe(false, false, "扫描结束");
+            break;
         case BLE_GAP_EVENT_NOTIFY_RX:
             if (g_ble_ctx.cb && g_ble_ctx.cb->on_characteristic_changed) {
                  uint8_t *data = NULL;
@@ -209,17 +322,23 @@ void android_ble_init(android_ble_callbacks_t *callbacks) {
 }
 
 int android_ble_start_scan(void) {
-    struct ble_gap_disc_params disc_params;
-
+    struct ble_gap_disc_params disc_params = {0};
+    ui_show_notify_safe(true, false, "正在扫描中");
     // 参数配置：被动扫描，不启用白名单
-    disc_params.filter_duplicates = 0;
-    disc_params.passive = 0;
-    disc_params.itvl = 0;
-    disc_params.window = 0;
-    disc_params.filter_policy = 0;
-    disc_params.limited = 0;
+    disc_params.filter_duplicates = 1; // 过滤重复包
+    disc_params.passive = 0;           // 主动扫描
+    disc_params.itvl = 0;              // 使用默认间隔
+    disc_params.window = 0;            // 使用默认窗口
+    uint8_t own_addr_type;
+    int rc = ble_hs_id_infer_auto(0, &own_addr_type);
+    if (rc != 0) {
+        printf("Error determining own address type; rc=%d\n", rc);
+        return -1;
+    }
 
-    return ble_gap_disc(0, 2000, &disc_params, ble_gap_event, NULL);
+    // 打印看看计算出了什么
+    printf("Calculated own_addr_type: %d\n", own_addr_type);
+    return ble_gap_disc(own_addr_type, 5000, &disc_params, ble_gap_event, NULL);
 }
 
 int android_ble_stop_scan(void) {
@@ -243,8 +362,8 @@ int android_ble_connect(const char *addr_str, uint8_t addr_type) {
         addr.val[i] = (uint8_t)mac[i];
     }
     addr.type = addr_type;
-
-    return ble_gap_connect(0, &addr, BLE_HS_FOREVER, NULL, ble_gap_event, NULL);
+    printf("android connect: %s\n", addr_str);
+    return ble_gap_connect(0, &addr, 10000, NULL, ble_gap_event, NULL);
 }
 
 int android_ble_disconnect(void) {
@@ -252,9 +371,80 @@ int android_ble_disconnect(void) {
     return ble_gap_terminate(g_ble_ctx.conn_handle, BLE_ERR_REM_USER_CONN_TERM);
 }
 
+static int on_scan_chrs_from_middle(uint16_t conn_handle,
+                                    const struct ble_gatt_error *error,
+                                    const struct ble_gatt_chr *chr,
+                                    void *arg) {
+    // 1. 结束判断 (EDONE)
+    if (error->status == BLE_HS_EDONE) {
+        printf("✅ [GATT] 0xFE86 特征发现完毕，回调上层应用\n");
+
+        // 调用用户的回调接口！
+        if (g_fe86_ctx.user_cb) {
+            // 参数：conn_handle, status=0, 服务数组指针, 服务数量=1
+            g_fe86_ctx.user_cb(conn_handle, 0, &g_fe86_ctx.temp_svc, 1);
+        }
+
+        // 任务完成，清理上下文（可选）
+        reset_ctx();
+        return 0;
+    }
+
+    // 2. 错误处理
+    if (error->status != 0) {
+        printf("❌ [GATT] 特征发现出错: %d\n", error->status);
+        if (g_fe86_ctx.user_cb) {
+            g_fe86_ctx.user_cb(conn_handle, error->status, NULL, 0);
+        }
+        reset_ctx();
+        return 0;
+    }
+
+    // 3. 填充数据到你的结构体
+    if (chr != NULL) {
+        app_ble_svc_t *svc = &g_fe86_ctx.temp_svc;
+
+        // 检查数组是否满了
+        if (svc->chr_count < MAX_DISC_CHRS_PER_SVC) {
+            app_ble_chr_t *my_chr = &svc->chars[svc->chr_count];
+
+            // 复制 Handle 和 属性
+            my_chr->def_handle = chr->def_handle;
+            my_chr->val_handle = chr->val_handle;
+            my_chr->properties = chr->properties;
+
+            // 复制 UUID (NimBLE 提供了专用复制函数)
+            ble_uuid_copy((ble_uuid_any_t *)&my_chr->uuid, (const ble_uuid_t *)&chr->uuid);
+
+            svc->chr_count++;
+
+            // [调试打印]
+            char buf[BLE_UUID_STR_LEN];
+            ble_uuid_to_str((const ble_uuid_t *)&chr->uuid, buf);
+            printf("   -> 存入特征: %s (Handle 0x%04X)\n", buf, chr->val_handle);
+        } else {
+            printf("⚠️ 警告: 特征数量超过 MAX_DISC_CHRS_PER_SVC，忽略剩余特征\n");
+        }
+    }
+
+    return 0;
+}
+
 int android_ble_discover_services(void) {
     if (!g_ble_ctx.connected) return BLE_HS_ENOTCONN;
-    return ble_gattc_disc_all_svcs(g_ble_ctx.conn_handle, on_svc_disc_cb, NULL);
+    // return ble_gattc_disc_all_svcs(g_ble_ctx.conn_handle, on_svc_disc_cb, NULL);
+
+    g_fe86_ctx.user_cb = g_ble_ctx.cb->on_services_discovered;
+    g_fe86_ctx.service_found = false;
+    static const ble_uuid16_t uuid_fe86 = BLE_UUID16_INIT(0xFE86);
+    reset_ctx();
+    return ble_gattc_disc_all_chrs(
+        g_ble_ctx.conn_handle,
+        0x0012,   // <--- 手动指定起点 (Page 2)
+        0xFFFF,
+        on_scan_chrs_from_middle,
+        NULL
+    );
 }
 
 int android_ble_read_char(uint16_t char_handle) {
@@ -264,7 +454,11 @@ int android_ble_read_char(uint16_t char_handle) {
 
 int android_ble_write_char(uint16_t char_handle, const uint8_t *data, uint16_t len, int type) {
     if (!g_ble_ctx.connected) return BLE_HS_ENOTCONN;
-
+    printf("SEND RAW: ");
+    for (int i = 0;i < len;i++) {
+        printf(" %02X", data[i]);
+    }
+    printf("\n");
     if (type == 1) { // No Response
         return ble_gattc_write_no_rsp_flat(g_ble_ctx.conn_handle, char_handle, data, len);
     } else { // With Response

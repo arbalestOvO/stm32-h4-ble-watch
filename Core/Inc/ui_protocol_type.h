@@ -33,9 +33,7 @@ typedef struct {
 } ui_message_t;
 
 // 全局 UI 队列
-TX_QUEUE g_ui_queue;
 #define UI_QUEUE_SIZE 20
-// buffer 大小 = 消息数量 * 单个消息大小
-uint8_t g_ui_queue_buffer[UI_QUEUE_SIZE * sizeof(ui_message_t)];
+
 
 #endif //ABOLUO_EXIT_UI_PROTOCOL_H
