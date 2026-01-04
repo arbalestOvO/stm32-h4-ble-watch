@@ -11,6 +11,7 @@
 #include "memorymap.h"
 #include "quadspi.h"
 #include "rng.h"
+#include "rtc.h"
 #include "sdmmc.h"
 #include "spi.h"
 #include "usart.h"
@@ -19,6 +20,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "app_log.h"
 #include "atk_rgblcd.h"
 #include "ble_client.h"
 #include "crypto_utils.h"
@@ -28,8 +30,8 @@
 #include "src/lv_init.h"
 #include "lvgl.h"
 #include "stm32h7xx_hal_dma2d.h"
+#include "TimeUtils.h"
 #include "ui.h"
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -60,7 +62,7 @@ static void MPU_Config(void);
 void my_stack_error_handler(TX_THREAD *thread_ptr)
 {
   // 如果跑到这里，说明真的栈溢出了！
-  printf("ERROR: Stack Overflow detected in thread: %s\n", thread_ptr->tx_thread_name);
+  LOG_PRINT("ERROR: Stack Overflow detected in thread: %s\n", thread_ptr->tx_thread_name);
   while(1); // 卡在这里方便调试
 }
 /* USER CODE END 0 */
@@ -114,6 +116,7 @@ int main(void)
   MX_LTDC_Init();
   MX_RNG_Init();
   MX_SPI1_Init();
+  MX_RTC_Init();
   /* USER CODE BEGIN 2 */
   DWT_Delay_Init();
   sdram_init();
@@ -167,11 +170,18 @@ void SystemClock_Config(void)
 
   while(!__HAL_PWR_GET_FLAG(PWR_FLAG_VOSRDY)) {}
 
+  /** Configure LSE Drive Capability
+  */
+  HAL_PWR_EnableBkUpAccess();
+  __HAL_RCC_LSEDRIVE_CONFIG(RCC_LSEDRIVE_LOW);
+
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI48|RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI48|RCC_OSCILLATORTYPE_HSE
+                              |RCC_OSCILLATORTYPE_LSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.LSEState = RCC_LSE_ON;
   RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
@@ -339,7 +349,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  printf("error\n");
+  LOG_PRINT("error\n");
   /* USER CODE END Error_Handler_Debug */
 }
 

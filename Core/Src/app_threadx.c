@@ -48,11 +48,10 @@
 
 /* Private variables ---------------------------------------------------------*/
 TX_THREAD tx_app_thread;
-TX_QUEUE g_ui_queue;
-uint8_t g_ui_queue_buffer[UI_QUEUE_SIZE * sizeof(ui_message_t)];
 /* USER CODE BEGIN PV */
 TX_MUTEX lvgl_mutex;
-
+TX_QUEUE g_ui_queue;
+uint8_t g_ui_queue_buffer[UI_QUEUE_SIZE * sizeof(ui_message_t)];
 void gui_init_threadx_setup() {
   tx_mutex_create(&lvgl_mutex, "LVGL Mutex", TX_NO_INHERIT);
 }
@@ -87,6 +86,7 @@ void app_json_init() {
   cJSON_InitHooks(&hooks);
 }
 /* USER CODE END PFP */
+
 /**
   * @brief  Application ThreadX Initialization.
   * @param memory_ptr: memory pointer

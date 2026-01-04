@@ -3,21 +3,28 @@
 //
 
 #include "crypto_utils.h"
-
-#include "crypto_utils.h"
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h> // 用于 printf
 
-/* * 辅助宏：检查 PSA 状态，如果失败则清除密钥并返回
+/*
+ * 辅助宏：检查 PSA 状态
+ * 修改点：将 status 强转为 (int) 并使用 %d 打印，避免 64 位打印问题
  */
 #define CHECK_STATUS(status) \
     if ((status) != PSA_SUCCESS) { \
+        printf("[Crypto] Error: %s:%d failed. Status: %d\n", __func__, __LINE__, (int)(status)); \
         goto exit; \
     }
 
 psa_status_t crypto_init(void)
 {
-    return psa_crypto_init();
+    psa_status_t status = psa_crypto_init();
+    if (status != PSA_SUCCESS) {
+        // 修改点：强转为 int
+        printf("[Crypto] Init failed. Status: %d\n", (int)status);
+    }
+    return status;
 }
 
 /* 内部辅助函数：导入 AES 密钥 */
@@ -25,7 +32,7 @@ static psa_status_t import_aes_key(const uint8_t *key, size_t key_len, psa_key_i
 {
     psa_key_attributes_t attributes = PSA_KEY_ATTRIBUTES_INIT;
     psa_set_key_usage_flags(&attributes, usage);
-    psa_set_key_algorithm(&attributes, PSA_ALG_ECB_NO_PADDING); // Default alg, will be overridden by usage context usually but type matters
+    psa_set_key_algorithm(&attributes, PSA_ALG_ECB_NO_PADDING); // Default alg
     psa_set_key_type(&attributes, PSA_KEY_TYPE_AES);
     psa_set_key_bits(&attributes, key_len * 8);
 
@@ -74,6 +81,7 @@ psa_status_t crypto_aes_ecb_encrypt_nopad(const uint8_t *key, size_t key_len,
     status = psa_cipher_encrypt(key_id, PSA_ALG_ECB_NO_PADDING,
                                 input, input_len,
                                 output, output_size, output_len);
+    CHECK_STATUS(status);
 
 exit:
     if (key_id != 0) psa_destroy_key(key_id);
@@ -98,6 +106,7 @@ psa_status_t crypto_aes_ecb_decrypt_nopad(const uint8_t *key, size_t key_len,
     status = psa_cipher_decrypt(key_id, PSA_ALG_ECB_NO_PADDING,
                                 input, input_len,
                                 output, output_size, output_len);
+    CHECK_STATUS(status);
 
 exit:
     if (key_id != 0) psa_destroy_key(key_id);
@@ -160,13 +169,6 @@ psa_status_t crypto_aes_cbc_decrypt_pad(const uint8_t *key, size_t key_len,
     status = psa_import_key(&attr, key, key_len, &key_id);
     CHECK_STATUS(status);
 
-    /* 直接使用单步调用，IV 必须包含在 input 的前缀中吗？
-       不，psa_cipher_decrypt 文档说：如果算法需要 IV，它通常作为 input 的一部分。
-       但是 PSA 的单步接口对于 CBC 模式，通常期望 IV 在密文前面。
-       Java 的 `decryptAES_CBC_Pad` 是单独传入 IV 的。
-
-       因此，我们必须使用多步操作 (setup -> set_iv -> update -> finish)。
-    */
     psa_cipher_operation_t operation = PSA_CIPHER_OPERATION_INIT;
 
     status = psa_cipher_decrypt_setup(&operation, key_id, PSA_ALG_CBC_PKCS7);
@@ -197,24 +199,19 @@ psa_status_t crypto_aes_ecb_encrypt_pad(const uint8_t *key, size_t key_len,
                                         const uint8_t *input, size_t input_len,
                                         uint8_t *output, size_t output_size, size_t *output_len)
 {
-    /* PSA 不支持 ECB 的自动 Padding，需要手动实现 PKCS7 */
     psa_status_t status;
     psa_key_id_t key_id = 0;
-    uint8_t *padded_input = NULL;
 
     /* 1. 计算 Padding */
     size_t pad_len = 16 - (input_len % 16);
     size_t total_len = input_len + pad_len;
 
-    if (output_size < total_len) return PSA_ERROR_BUFFER_TOO_SMALL;
-
-    /* 为了简单起见，我们假设 output 缓冲区够大，直接在 output 上构造 padded 数据？
-       不行，因为 input 和 output 可能是同一个 buffer (in-place)，或者重叠。
-       安全起见，申请临时 buffer。嵌入式下可以使用栈 buffer 如果数据小，
-       这里使用 malloc 确保通用性，或者要求调用者保证 output 够大并先拷贝。
-
-       优化：直接拷贝到 output，然后填充 output。前提是 caller 提供了 output buffer。
-    */
+    if (output_size < total_len) {
+        // 修改点：size_t 强转 unsigned int，使用 %u
+        printf("[Crypto] Error: ECB Encrypt buf too small. Need %u, got %u\n",
+               (unsigned int)total_len, (unsigned int)output_size);
+        return PSA_ERROR_BUFFER_TOO_SMALL;
+    }
 
     /* 拷贝原数据到输出 */
     memcpy(output, input, input_len);
@@ -231,16 +228,24 @@ psa_status_t crypto_aes_ecb_encrypt_pad(const uint8_t *key, size_t key_len,
     psa_set_key_type(&attr, PSA_KEY_TYPE_AES);
 
     status = psa_import_key(&attr, key, key_len, &key_id);
-    if (status != PSA_SUCCESS) return status; // 早期返回不需要 goto，因为还没有分配资源
+    if (status != PSA_SUCCESS) {
+        // 修改点：强转 int
+        printf("[Crypto] Error: ECB Encrypt Import Key failed. Status: %d\n", (int)status);
+        return status;
+    }
 
-    /* 加密可以原地进行 (in-place) */
     size_t enc_len = 0;
     status = psa_cipher_encrypt(key_id, PSA_ALG_ECB_NO_PADDING,
-                                output, total_len, // 输入是刚刚填充好的 output
-                                output, output_size, // 输出覆盖回去
+                                output, total_len,
+                                output, output_size,
                                 &enc_len);
 
-    *output_len = enc_len;
+    if (status != PSA_SUCCESS) {
+        // 修改点：强转 int
+        printf("[Crypto] Error: ECB Encrypt execution failed. Status: %d\n", (int)status);
+    } else {
+        *output_len = enc_len;
+    }
 
     if (key_id != 0) psa_destroy_key(key_id);
     return status;
@@ -271,6 +276,8 @@ psa_status_t crypto_aes_ecb_decrypt_pad(const uint8_t *key, size_t key_len,
 
     /* 2. 移除 PKCS7 Padding */
     if (dec_len == 0 || dec_len % 16 != 0) {
+        // 修改点：强转 unsigned int
+        printf("[Crypto] Error: Invalid ECB decrypt length: %u\n", (unsigned int)dec_len);
         status = PSA_ERROR_INVALID_PADDING;
         goto exit;
     }
@@ -279,12 +286,17 @@ psa_status_t crypto_aes_ecb_decrypt_pad(const uint8_t *key, size_t key_len,
 
     /* 校验 Padding 合法性 */
     if (pad_val == 0 || pad_val > 16 || pad_val > dec_len) {
+        // 修改点：强转 unsigned int
+        printf("[Crypto] Error: Invalid PKCS7 pad value: %d (dec_len: %u)\n",
+               (int)pad_val, (unsigned int)dec_len);
         status = PSA_ERROR_INVALID_PADDING;
         goto exit;
     }
 
     for (size_t i = 0; i < pad_val; i++) {
         if (output[dec_len - 1 - i] != pad_val) {
+            // 修改点：强转 unsigned int
+            printf("[Crypto] Error: Bad PKCS7 padding byte at index %u\n", (unsigned int)i);
             status = PSA_ERROR_INVALID_PADDING;
             goto exit;
         }
@@ -316,13 +328,13 @@ psa_status_t crypto_aes_gcm_encrypt(const uint8_t *key, size_t key_len,
     status = psa_import_key(&attr, key, key_len, &key_id);
     CHECK_STATUS(status);
 
-    /* PSA AEAD 接口会自动处理 GCM Tag，将其附加在密文末尾 */
     status = psa_aead_encrypt(key_id, PSA_ALG_GCM,
                               iv, iv_len,
                               aad, aad_len,
                               input, input_len,
                               output, output_size,
                               output_len);
+    CHECK_STATUS(status);
 
 exit:
     if (key_id != 0) psa_destroy_key(key_id);
@@ -352,6 +364,7 @@ psa_status_t crypto_aes_gcm_decrypt(const uint8_t *key, size_t key_len,
                               input, input_len,
                               output, output_size,
                               output_len);
+    CHECK_STATUS(status);
 
 exit:
     if (key_id != 0) psa_destroy_key(key_id);
@@ -374,6 +387,7 @@ psa_status_t crypto_hmac_sha256(const uint8_t *key, size_t key_len,
                              input, input_len,
                              output, output_size,
                              output_len);
+    CHECK_STATUS(status);
 
 exit:
     if (key_id != 0) psa_destroy_key(key_id);
@@ -385,10 +399,15 @@ exit:
 psa_status_t crypto_sha256(const uint8_t *input, size_t input_len,
                            uint8_t *output, size_t output_size, size_t *output_len)
 {
-    return psa_hash_compute(PSA_ALG_SHA_256,
-                            input, input_len,
-                            output, output_size,
-                            output_len);
+    psa_status_t status = psa_hash_compute(PSA_ALG_SHA_256,
+                                           input, input_len,
+                                           output, output_size,
+                                           output_len);
+    if (status != PSA_SUCCESS) {
+        // 修改点：强转 int
+        printf("[Crypto] SHA256 compute failed. Status: %d\n", (int)status);
+    }
+    return status;
 }
 
 /* ================== HKDF SHA256 ================== */
@@ -448,7 +467,6 @@ psa_status_t crypto_pbkdf2_sha256(const char *password, size_t password_len,
     psa_key_derivation_operation_t operation = PSA_KEY_DERIVATION_OPERATION_INIT;
 
     /* 导入 Password 作为密钥 */
-    /* 注意：PSA PBKDF2 的输入通常作为 PSA_KEY_DERIVATION_INPUT_PASSWORD 或 INPUT_SECRET */
     status = import_derivation_key((const uint8_t*)password, password_len, &key_id, PSA_ALG_PBKDF2_HMAC(PSA_ALG_SHA_256));
     CHECK_STATUS(status);
 
@@ -456,6 +474,7 @@ psa_status_t crypto_pbkdf2_sha256(const char *password, size_t password_len,
     CHECK_STATUS(status);
 
     /* 设置 Cost (Iterations) */
+    // iterations 是 uint32_t，使用 %u 打印是安全的，这里是参数输入，不需要打印
     status = psa_key_derivation_input_integer(&operation, PSA_KEY_DERIVATION_INPUT_COST, iterations);
     CHECK_STATUS(status);
 

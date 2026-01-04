@@ -8,6 +8,6 @@
 extern void send_tlv_and_backup(AuthContext_t* ctx, const uint8_t* data, uint16_t len);
 
 int Handle0135(AuthContext_t* ctx, uint8_t* data, int len) {
-    // Implementation for command 0135
+    ctx->state = AUTH_STATE_AUTHENTICATED;
     return 0;
 }

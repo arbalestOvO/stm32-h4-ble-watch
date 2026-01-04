@@ -160,13 +160,13 @@ void print_current_thread_stack_info(void)
 
 void print_hex(const char *tag, const uint8_t *data, size_t len)  {
     if (tag != NULL) {
-        printf("[%s] Length: %zu bytes\n", tag, len);
+        printf("[%s] Length: %d bytes\n", tag, (int)len);
     }
 
     for (size_t i = 0; i < len; i++) {
         // 每 16 个字节换一行，并打印当前偏移量
         if (i % 16 == 0) {
-            printf("%04zx: ", i);
+            printf("%04d: ", i);
         }
 
         // 打印字节的16进制值

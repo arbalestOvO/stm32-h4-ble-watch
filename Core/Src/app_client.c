@@ -7,15 +7,17 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "app_log.h"
 #include "app_threadx.h"
 #include "auth_client.h"
 #include "ble_client.h"
+#include "hichain_utils.h"
 #include "stm32h7xx_hal.h"
 #include "tx_api.h"
 #include "host/ble_hs_id.h"
 
 #define MAC_LEN 18
-#define APP_CLIENT_QUEUE_STACK_SIZE 1024 * 4
+#define APP_CLIENT_QUEUE_STACK_SIZE 1024 * 6
 // 计算需要的 Word 数量： (18 + 3) / 4 = 5 Words
 // 这样 5 * 4 = 20 字节，足够存下 18 字节的 MAC
 #define QUEUE_MSG_SIZE_WORDS  ((MAC_LEN + 3) / 4)
@@ -52,7 +54,16 @@ void App_Client_Task_Entry(ULONG entry_input) {
         if (ctx == NULL) continue;
         AuthResult_t auth_result = auth(ctx);
         printf("auth_result returned %d\n", auth_result);
-        AuthContext_Free(ctx);
+        // AuthContext_Free(ctx);
+    }
+}
+
+void on_app_tlv_received(uint16_t id, uint8_t* data, int len) {
+    print_hex("app tlv", data, len);
+    if (id == 0x0110 && len >= 10) {
+        size_t len_s = 0;
+        uint8_t *data_s = hex_string_to_bytes("01100200040008023134100100110459685f0c1301001401001500160100", &len_s);
+        send_app_tlv(data_s, len_s, true);
     }
 }
 

@@ -104,20 +104,27 @@ static struct ble_npl_event g_write_done_evt;
 extern TX_QUEUE app_connect_notify_queue;
 
 static struct ble_npl_event g_notify_done_evt;
+static uint16_t g_conn;
+
+static void do_notify(struct ble_npl_event *ev) {
+    // android_ble_discover_services();
+    tx_thread_sleep(30);
+    android_ble_enable_notification(0x002F, true, false);
+}
 
 // 2. 实际执行服务发现的函数（由事件队列调度）
 static void do_discovery_after_mtu(struct ble_npl_event *ev) {
     // android_ble_discover_services();
     tx_thread_sleep(30);
-    is_need_dis = true;
-    android_ble_request_mtu(257);
+
+    // is_need_dis = true;
+    // android_ble_request_mtu(257);
+
+    ble_npl_event_init(&g_notify_done_evt, do_notify, (void *)(uintptr_t)g_conn);
+    ble_npl_eventq_put(ble_hs_evq_get(), &g_notify_done_evt);
 }
 
-static void do_notify(struct ble_npl_event *ev) {
-    // android_ble_discover_services();
-    tx_thread_sleep(30);
-    android_ble_enable_notification(0x0019, true, false);
-}
+
 
 static void write_done(struct ble_npl_event *ev) {
     uint32_t connect_allow = 1;
@@ -149,6 +156,7 @@ void on_scan_result(const char *addr_str, int rssi, const uint8_t *adv_data, int
 void on_connection_state_change(uint16_t conn_handle, int status, int new_state) {
     printf("[APP] 连接状态改变: Handle=%d, Status=%d, NewState=%d\n", conn_handle, status, new_state);
     if (new_state == 2) {
+        g_conn = conn_handle;
         ui_show_notify_safe(true, false, "连接成功,进行服务发现");
         ble_npl_event_init(&g_mtu_done_evt, do_discovery_after_mtu, (void *)(uintptr_t)conn_handle);
         ble_npl_eventq_put(ble_hs_evq_get(), &g_mtu_done_evt);
@@ -188,8 +196,11 @@ void on_characteristic_read(uint16_t conn_handle, int status, uint16_t char_hand
     printf("[APP] 读取回调 (Handle=%d, Status=%d, Len=%d): ", char_handle, status, len);
 }
 
+proto_parser_t g_parser;
+
 void on_characteristic_write(uint16_t conn_handle, int status, uint16_t char_handle) {
     printf("[APP] 写入完成 (Handle=%d, Status=%d)\n", char_handle, status);
+    parser_init(&g_parser);
     ble_npl_event_init(&g_write_done_evt, write_done, (void *)(uintptr_t)conn_handle);
     ble_npl_eventq_put(ble_hs_evq_get(), &g_write_done_evt);
 
@@ -203,19 +214,17 @@ void on_characteristic_changed(uint16_t conn_handle, uint16_t char_handle, const
         printf("%02X", data[i]);
     }
     printf("\n");
-    proto_parser_t parser;
-    parser_init(&parser);
-    parser_input_buffer(&parser, data, len, on_received_frame);
+    parser_input_buffer(&g_parser, data, len, on_received_frame);
 }
 
 void on_mtu_changed(uint16_t conn_handle, int mtu, int status) {
     printf("[APP] MTU 更新: %d (Status=%d)\n", mtu, status);
-    if (is_need_dis) {
-        ui_show_notify_safe(true, false, "mtu更新成功,进行服务发现");
-        ble_npl_event_init(&g_notify_done_evt, do_notify, (void *)(uintptr_t)conn_handle);
-        ble_npl_eventq_put(ble_hs_evq_get(), &g_notify_done_evt);
-        is_need_dis = false;
-    }
+    // if (is_need_dis) {
+    //     ui_show_notify_safe(true, false, "mtu更新成功,进行服务发现");
+    //     ble_npl_event_init(&g_notify_done_evt, do_notify, (void *)(uintptr_t)conn_handle);
+    //     ble_npl_eventq_put(ble_hs_evq_get(), &g_notify_done_evt);
+    //     is_need_dis = false;
+    // }
 }
 
 static void print_addr(const void *addr) {
@@ -274,13 +283,29 @@ void App_Ble_Client_Task_Entry(ULONG thread_input) {
     ble_hs_cfg.reset_cb = on_reset;
     ble_hs_cfg.sync_cb = on_sync;
 
-    /* 配置 IO 能力 (通常扫描不需要，但如果是作为从机需要) */
+    /* 1. IO 能力保持为 No Input No Output */
     ble_hs_cfg.sm_io_cap = BLE_SM_IO_CAP_NO_IO;
+
+    /* 2. 禁用绑定 (Bonding) */
+    /* 之前是 1，改为 0。这意味着主机告诉对方：“我不保存密钥，连完就忘” */
+    ble_hs_cfg.sm_bonding = 0;
+
+    /* 3. 禁用安全连接 (Secure Connections) */
+    /* 之前是 1，改为 0。回退到旧版配对模式，甚至不配对 */
+    ble_hs_cfg.sm_sc = 0;
+
+    /* 4. 禁用中间人保护 (MITM) */
+    ble_hs_cfg.sm_mitm = 0;
+
+    /* 5. 清空密钥分发能力 */
+    /* 之前你配置了 ENC|ID，改为 0。意思是：“我没有密钥给你，你也别给我” */
+    ble_hs_cfg.sm_our_key_dist = 0;
+    ble_hs_cfg.sm_their_key_dist = 0;
     ble_store_ram_init();
     nimble_port_run();
 }
 
-#define STACK_SIZE 2048
+#define STACK_SIZE 2048 * 4
 
 static TX_THREAD tx_app_thread;
 static uint8_t thread_stack[STACK_SIZE];

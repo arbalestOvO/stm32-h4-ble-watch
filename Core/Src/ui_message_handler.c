@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "test_hci.h"
 #include "tx_api.h"
 #include "ui_interface.h"
 #include "build/Release/_deps/lvgl-src/src/misc/lv_types.h"
@@ -24,6 +25,7 @@ void on_connect_click_event(lv_event_t * e)
     ui_show_notify_safe(true, false, "正在连接中");
     // 这里可以发送消息回 业务线程/蓝牙线程 去发起连接
     tx_queue_send(&app_client_queue, mac_addr, TX_NO_WAIT);
+    // test(mac_addr);
 }
 
 lv_obj_t * Find_Item_By_Mac(lv_obj_t * parent_panel, const char * target_mac)

@@ -153,6 +153,31 @@ double htlv_read_double(const htlv_view_t* view) {
     return res;
 }
 
+size_t htlv_read_string(const htlv_view_t* view, char* out_buf, size_t buf_size) {
+    if (out_buf == NULL || buf_size == 0) {
+        return 0;
+    }
+
+    if (view->length == 0) {
+        out_buf[0] = '\0';
+        return 0;
+    }
+
+    // 计算实际需要拷贝的长度：不能超过 view 的长度，也要给 \0 留位置
+    // 如果 buf_size 足够大：copy_len = view->length
+    // 如果 buf_size 不够大：copy_len = buf_size - 1
+    size_t copy_len = (view->length < buf_size) ? view->length : (buf_size - 1);
+
+    if (copy_len > 0) {
+        memcpy(out_buf, view->value, copy_len);
+    }
+
+    // 强制添加字符串结束符
+    out_buf[copy_len] = '\0';
+
+    return copy_len;
+}
+
 bool htlv_read_bool(const htlv_view_t* view) {
     if (view->length == 0) return false;
     return view->value[0] == 1;

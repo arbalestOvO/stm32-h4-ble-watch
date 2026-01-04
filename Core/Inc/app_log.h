@@ -8,6 +8,18 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// app_log.h
+
+#if defined(DEBUG)
+    #include <stdio.h>
+    // Debug 模式下，LOG_PRINT 等于 printf
+    #define LOG_PRINT(...)  printf(__VA_ARGS__)
+#else
+    // Release 模式下，LOG_PRINT 替换为空，编译器会直接优化掉这行代码
+    // 既不占用 Flash，也不消耗 CPU
+    #define LOG_PRINT(...)
+#endif
+
 /**
  * @brief  初始化打印任务 (在 tx_application_define 中调用)
  */

@@ -108,7 +108,7 @@ TX_THREAD       *current_thread;
 
         /* Check for a wait option error.  Only threads are allowed any form of
            suspension.  */
-         if (wait_option != TX_NO_WAIT)
+        if (wait_option != TX_NO_WAIT)
         {
 
             /* Is the call from an ISR or Initialization?  */

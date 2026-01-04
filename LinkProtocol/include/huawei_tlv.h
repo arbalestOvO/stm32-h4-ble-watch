@@ -76,6 +76,7 @@ int32_t htlv_read_int(const htlv_view_t* view);
 int16_t htlv_read_short(const htlv_view_t* view);
 int64_t htlv_read_long(const htlv_view_t* view);
 double htlv_read_double(const htlv_view_t* view); // Little Endian per Java code
+size_t htlv_read_string(const htlv_view_t* view, char* out_buf, size_t buf_size);
 bool htlv_read_bool(const htlv_view_t* view);
 // String 实际上就是 (char*)view->value，因为是 UTF-8，但注意不一定以 \0 结尾
 

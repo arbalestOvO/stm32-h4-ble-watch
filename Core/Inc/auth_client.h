@@ -4,9 +4,15 @@
 
 #ifndef ABOLUO_EXIT_AUTH_CLIENT_H
 #define ABOLUO_EXIT_AUTH_CLIENT_H
+#include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
+#include "hichain_type.h"
 #include "tx_api.h"
+
+
+#define PIN_LEN  3
 
 
 typedef enum {
@@ -28,6 +34,7 @@ typedef enum {
     AUTH_STATE_WAIT_0137,
     AUTH_STATE_WAIT_0131,
     AUTH_STATE_WAIT_0130,
+    AUTH_STATE_WAIT_013D,
     AUTH_STATE_WAIT_013F,
     AUTH_STATE_WAIT_013E,
     AUTH_STATE_WAIT_0135,
@@ -55,7 +62,7 @@ typedef struct {
 
     int timeout_ms;
     AuthState_t state;
-    uint8_t hichainStep;
+    HiChainContext hichain_context;
 
     TX_QUEUE tx_queue;
     void* queue_mem;
@@ -65,7 +72,8 @@ typedef struct {
 
     char uuid[33];
     char mac[16];
-    uint8_t pinCode[64];
+    uint8_t pinCode[PIN_LEN];
+    uint8_t secretKey[32];
     uint8_t *last_buf;
     uint32_t last_len;
 } AuthContext_t;
@@ -82,6 +90,10 @@ AuthContext_t* AuthContext_Create(char* mac, int timeout_ms, int retryTimes);
 AuthResult_t auth(AuthContext_t* context);
 
 void AuthContext_Free(AuthContext_t* context);
+
+int encrypt(uint8_t sid, uint8_t cid, uint8_t **tlv, size_t *len);
+
+void send_app_tlv(uint8_t* data, size_t len, bool is_encrypt);
 
 void on_tlv_received(uint8_t* data, int len);
 

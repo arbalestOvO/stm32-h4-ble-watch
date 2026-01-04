@@ -363,7 +363,24 @@ int android_ble_connect(const char *addr_str, uint8_t addr_type) {
     }
     addr.type = addr_type;
     printf("android connect: %s\n", addr_str);
-    return ble_gap_connect(0, &addr, 10000, NULL, ble_gap_event, NULL);
+    struct ble_gap_conn_params conn_params = {0};
+    conn_params.scan_itvl = 16;  // 扫描间隔 (16 * 0.625ms = 10ms)
+    conn_params.scan_window = 16; // 扫描窗口 (10ms，即持续扫描)
+
+    // 1. 设置极速间隔 (7.5ms - 15ms)
+    conn_params.itvl_min = 6;    // 6 * 1.25ms = 7.5ms
+    conn_params.itvl_max = 12;   // 12 * 1.25ms = 15ms
+
+    // 2. 必须为 0，确保 Slave 每次都响应，不许偷懒省电
+    conn_params.latency = 0;
+
+    // 3. 超时时间 (4秒)
+    conn_params.supervision_timeout = 400;
+
+    // 4.这一步不用设，留 0 即可
+    conn_params.min_ce_len = 0;
+    conn_params.max_ce_len = 0;
+    return ble_gap_connect(0, &addr, 10000, &conn_params, ble_gap_event, NULL);
 }
 
 int android_ble_disconnect(void) {

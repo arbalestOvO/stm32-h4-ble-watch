@@ -5,6 +5,5 @@
 #ifndef ABOLUO_EXIT_TEST_HCI_H
 #define ABOLUO_EXIT_TEST_HCI_H
 
-void bt_test_start(void);
-
+void test(char* mac);
 #endif //ABOLUO_EXIT_TEST_HCI_H

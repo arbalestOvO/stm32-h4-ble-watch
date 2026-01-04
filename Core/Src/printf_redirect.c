@@ -12,7 +12,9 @@
 
 int _write(int file, char *ptr, int len)
 {
+#ifdef DEBUG
     UART_Buffer_Write((uint8_t *)ptr, len);
+#endif
     return len;
 }
 
@@ -30,8 +32,10 @@ void _sys_exit(int x) { x = x; }
 
 int fputc(int ch, FILE *f)
 {
+#ifdef DEBUG
     uint8_t temp = (uint8_t)ch;
     UART_Buffer_Write(&temp, 1);
+#endif
     return ch;
 }
 
@@ -42,7 +46,9 @@ int fputc(int ch, FILE *f)
 
 size_t __write(int handle, const unsigned char * buffer, size_t size)
 {
+#ifdef DEBUG
     UART_Buffer_Write((uint8_t *)buffer, size);
+#endif
     return size;
 }
 

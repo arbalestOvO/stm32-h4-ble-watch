@@ -11,15 +11,18 @@
 
 extern void send_tlv_and_backup(AuthContext_t* ctx, const uint8_t* data, uint16_t len);
 
+static uint8_t HICHAIN_FLAG = 0x04;
+static uint8_t HICHAIN_FLAG_01 = 0x01;
+static uint8_t HICHAIN_FLAG_00 = 0x00;
 void send_0133_cmd(AuthContext_t* ctx) {
     uint8_t buffer[64] = {0x01, 0x33};
     htlv_writer_t writer;
     htlv_writer_init(&writer, buffer, sizeof(buffer));
     writer.offset += 2;
-    htlv_write_int(&writer, 0x01, 0x04);
-    htlv_write_int(&writer, 0x02, 0x01);
-    htlv_write_int(&writer, 0x03, 0x01);
-    htlv_write_int(&writer, 0x04, 0x00);
+    htlv_write_tag(&writer, 0x01, &HICHAIN_FLAG, 1);
+    htlv_write_tag(&writer, 0x02, &HICHAIN_FLAG_01, 1);
+    htlv_write_tag(&writer, 0x03, &HICHAIN_FLAG_01, 1);
+    htlv_write_tag(&writer, 0x04, &HICHAIN_FLAG_00, 1);
     htlv_write_string(&writer, 0x05, ctx->uuid);
     htlv_write_tag(&writer, 0x06, NULL, 0);
     htlv_write_string(&writer, 0x07, "STM32");
@@ -74,5 +77,6 @@ int Handle0101(AuthContext_t* ctx, uint8_t* data, int len)
         printf("[0101 WARN] not found 0x0C\n");
     }
     printf("update 0101 ok\n");
+    send_0133_cmd(ctx);
     return 0;
 }

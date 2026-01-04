@@ -3,6 +3,7 @@
 #include <string.h>
 #include "hichain_utils.h"
 
+
 char* bytes_to_hex(const uint8_t *src, size_t len) {
     if (!src || len == 0) return NULL;
     // 每个字节占2个字符 + 1个结束符
@@ -40,4 +41,13 @@ uint8_t* hex_string_to_bytes(const char *hex, size_t *out_len) {
     
     if (out_len) *out_len = final_len;
     return bytes;
+}
+
+void hichain_RequestConfig_Init(RequestConfig *config, uint64_t request_id, uint8_t operation_code) {
+    static uint8_t fake_auth_id[] = "7410142703F4FDF544C6EE8A7DD3AC29";
+    config->request_id = request_id;
+    config->group_id = "7B0BC0CBCE474F6C238D9661C63400B797B166EA7849B3A370FC73A9A236E989";
+    config->operation_code = operation_code;
+    config->self_auth_id = fake_auth_id;
+    config->self_auth_id_len = sizeof(fake_auth_id) - 1;
 }

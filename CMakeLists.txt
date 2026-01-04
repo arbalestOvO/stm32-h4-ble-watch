@@ -54,6 +54,13 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS TRUE)
 
 add_subdirectory(TF-PSA-Crypto)
 
+add_compile_definitions(
+        $<$<CONFIG:Debug>:DEBUG>
+        $<$<CONFIG:Release>:NDEBUG>
+        $<$<CONFIG:RelWithDebInfo>:NDEBUG>
+        $<$<CONFIG:MinSizeRel>:NDEBUG>
+)
+
 # ==============================================================================
 # ESP-HOSTED MINIMAL SET (SPI + BT ONLY)
 # ==============================================================================
@@ -271,6 +278,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/Core/Src/app_client.c
     ${CMAKE_SOURCE_DIR}/Core/Src/ui_message_handler.c
     ${CMAKE_SOURCE_DIR}/Core/Src/ui_interface.c
+    ${CMAKE_SOURCE_DIR}/Core/Src/TimeUtils.c
 )
 
 # Add include paths
