@@ -119,7 +119,7 @@ static void do_discovery_after_mtu(struct ble_npl_event *ev) {
 
     // is_need_dis = true;
     // android_ble_request_mtu(257);
-
+    ui_show_notify_safe(true, false, "获取连接参数中");
     ble_npl_event_init(&g_notify_done_evt, do_notify, (void *)(uintptr_t)g_conn);
     ble_npl_eventq_put(ble_hs_evq_get(), &g_notify_done_evt);
 }

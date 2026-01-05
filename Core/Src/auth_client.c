@@ -18,6 +18,7 @@
 #include "random_utils.h"
 #include "TimeUtils.h"
 #include "tx_api.h"
+#include "ui_interface.h"
 #include "commands/inc/command0101.h"
 #include "commands/inc/command012c.h"
 #include "commands/inc/command0128.h"
@@ -393,6 +394,7 @@ AuthResult_t auth(AuthContext_t *context) {
     // 否则 on_received_frame 会丢弃后续的应用数据包。
     // 只在失败时清理，成功时保持连接状态。
     if (result != AUTH_STATUS_OK) {
+        ui_show_notify_safe(false, false, "鉴权失败...");
         g_active_ctx = NULL;
         cleanup_queue_messages(context);
     } else {

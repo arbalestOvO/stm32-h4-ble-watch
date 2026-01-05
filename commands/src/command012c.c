@@ -9,6 +9,7 @@
 #include "hichain_utils.h"
 #include "huawei_tlv.h"
 #include "random_utils.h"
+#include "ui_interface.h"
 
 extern void send_tlv_and_backup(AuthContext_t* ctx, const uint8_t* data, uint16_t len);
 
@@ -17,6 +18,7 @@ extern void send_tlv_and_backup(AuthContext_t* ctx, const uint8_t* data, uint16_
 // 2025-12-30 00:41:53.513   855-871   LZX                     nod...n.freeyourgadget.gadgetbridge  I  LZX pinCode 13524034589334060034385235943736869396922334533706040305257543237526471231264243029125066405346231014793858801099713935323152171
 
 void send_hichain_start(AuthContext_t* ctx) {
+    ui_show_notify_safe(true, false, "鉴权中...");
     printf("begin hichain req: %llu\n", ctx->hichain_context.requestId);
     printf("Request operationCode: %d - step: %d\n", ctx->hichain_context.operationCode, ctx->hichain_context.step);
     Random_GetByteArray(ctx->hichain_context.seed, 0x20);

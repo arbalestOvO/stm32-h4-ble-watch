@@ -279,6 +279,7 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/Core/Src/ui_message_handler.c
     ${CMAKE_SOURCE_DIR}/Core/Src/ui_interface.c
     ${CMAKE_SOURCE_DIR}/Core/Src/TimeUtils.c
+        ${CMAKE_SOURCE_DIR}/Core/Src/watch_menu.c
 )
 
 # Add include paths

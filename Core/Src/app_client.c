@@ -12,8 +12,10 @@
 #include "auth_client.h"
 #include "ble_client.h"
 #include "hichain_utils.h"
+#include "huawei_tlv.h"
 #include "stm32h7xx_hal.h"
 #include "tx_api.h"
+#include "watch_menu.h"
 #include "host/ble_hs_id.h"
 
 #define MAC_LEN 18
@@ -54,6 +56,9 @@ void App_Client_Task_Entry(ULONG entry_input) {
         if (ctx == NULL) continue;
         AuthResult_t auth_result = auth(ctx);
         printf("auth_result returned %d\n", auth_result);
+        if (auth_result == 0) {
+            switchToMenu();
+        }
         // AuthContext_Free(ctx);
     }
 }
@@ -64,6 +69,15 @@ void on_app_tlv_received(uint16_t id, uint8_t* data, int len) {
         size_t len_s = 0;
         uint8_t *data_s = hex_string_to_bytes("01100200040008023134100100110459685f0c1301001401001500160100", &len_s);
         send_app_tlv(data_s, len_s, true);
+    }
+    if (id == 0x0b01) {
+        htlv_view_t view;
+        htlv_find(data, len, 0x01, &view);
+        if (htlv_read_bool(&view) == true) {
+            trigger_find_my_watch();
+        } else {
+            stop_find_my_watch();
+        }
     }
 }
 
